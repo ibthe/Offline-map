@@ -1,0 +1,78 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Map data (tiles + fonts) is rebuilt only when tools/ or this file change
+      - name: Cache map data
+        id: mapdata
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/src/main/assets/georgia.mbtiles
+            app/src/main/assets/glyphs
+          key: mapdata-v1-${{ hashFiles('tools/**', '.github/workflows/build.yml') }}
+
+      - name: Download OSM extract of Georgia (Geofabrik)
+        if: steps.mapdata.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p data
+          curl -L --fail --retry 3 -o data/georgia.osm.pbf \
+            https://download.geofabrik.de/europe/georgia-latest.osm.pbf
+          ls -lh data/georgia.osm.pbf
+
+      - name: Build vector tiles with Planetiler (OpenMapTiles schema)
+        if: steps.mapdata.outputs.cache-hit != 'true'
+        run: |
+          curl -L --fail --retry 3 -o data/planetiler.jar \
+            https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
+          mkdir -p app/src/main/assets
+          java -Xmx4g -jar data/planetiler.jar \
+            --osm-path=data/georgia.osm.pbf \
+            --download \
+            --output=app/src/main/assets/georgia.mbtiles \
+            --force \
+            --maxzoom=14
+          ls -lh app/src/main/assets/georgia.mbtiles
+
+      - name: Check that tiles contain ka / ru / en names
+        if: steps.mapdata.outputs.cache-hit != 'true'
+        run: python tools/check_tiles.py app/src/main/assets/georgia.mbtiles
+
+      - name: Download label fonts (glyphs) for Latin + Cyrillic + Georgian
+        if: steps.mapdata.outputs.cache-hit != 'true'
+        run: python tools/build_glyphs.py app/src/main/assets/glyphs/NotoSans
+
+      - name: Generate map style
+        run: python tools/gen_style.py app/src/main/assets/style.json
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build APK
+        run: gradle --no-daemon -Pvcode=${{ github.run_number }} :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: georgia-offline-map-apk
+          path: app/build/outputs/apk/debug/*.apk
+          compression-level: 0
