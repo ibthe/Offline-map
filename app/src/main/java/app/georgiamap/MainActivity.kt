@@ -972,7 +972,9 @@ class MainActivity : AppCompatActivity() {
             "Вода и родники" to listOf("drinking_water", "spring", "water_point", "water_tap"),
             "Туалеты" to listOf("toilets"),
             "Парковки" to listOf("parking"),
-            "Транспорт" to listOf("bus", "bus_station", "bus_stop", "railway", "station", "taxi", "aerodrome", "ferry_terminal"),
+            "Вокзалы и станции" to listOf("railway", "station", "halt", "subway", "tram_stop", "bus_station",
+                "ferry_terminal", "harbor", "aerodrome", "airport", "aerialway"),
+            "Остановки и такси" to listOf("bus", "bus_stop", "taxi"),
             "Достопримечательности" to listOf("attraction", "viewpoint", "museum", "monument", "castle", "ruins",
                 "church", "monastery", "place_of_worship", "waterfall", "memorial", "archaeological_site", "information"),
             "Полиция и экстренные" to listOf("police", "fire_station", "emergency")
@@ -988,7 +990,13 @@ class MainActivity : AppCompatActivity() {
             "camp_site" to "кемпинг", "bank" to "банк", "atm" to "банкомат", "parking" to "парковка",
             "viewpoint" to "смотровая", "museum" to "музей", "castle" to "замок", "monastery" to "монастырь",
             "place_of_worship" to "храм", "supermarket" to "супермаркет", "drinking_water" to "питьевая вода",
-            "spring" to "родник", "toilets" to "туалет", "police" to "полиция"
+            "spring" to "родник", "toilets" to "туалет", "police" to "полиция",
+            "station" to "ж/д вокзал, станция", "halt" to "ж/д платформа", "subway" to "метро",
+            "bus_station" to "автовокзал", "bus_stop" to "остановка", "tram_stop" to "трамвайная остановка",
+            "ferry_terminal" to "паромный терминал", "taxi" to "такси", "fire_station" to "пожарная часть",
+            "clinic" to "клиника", "charging_station" to "зарядка EV",
+            "bakery" to "пекарня", "convenience" to "магазин", "marketplace" to "рынок",
+            "alpine_hut" to "горная хижина"
         )
     }
 }

@@ -191,15 +191,24 @@ layer("road-unpaved", "line", "transportation",
       ["all", cls("tertiary", "minor", "service", "secondary"), UNPAVED, NOTUNNEL], minzoom=12, layout=BUTT,
       paint={"line-color": c("#c9bfa8", "#2b3036"), "line-dasharray": [2.5, 2.5], "line-opacity": 0.9,
              "line-width": zi((12, 0.5), (15, 1.6), (18, 5))})
-layer("road-oneway", "symbol", "transportation",
-      ["all", ["==", ["get", "oneway"], 1], cls("minor", "tertiary", "secondary", "primary", "service")],
-      minzoom=16, source="openmaptiles-labels",
-      layout={"symbol-placement": "line", "symbol-spacing": 150, "text-field": ">",
-              "text-font": FONT, "text-size": 12, "text-keep-upright": False, "text-rotation-alignment": "map"},
-      paint={"text-color": c("#8a8a92", "#9aa0aa")})
-layer("rail", "line", "transportation", cls("rail"), minzoom=8, layout={"line-join": "round"},
+ONEWAY_CLS = cls("minor", "tertiary", "secondary", "primary", "service")
+for _id, _val, _txt in (("road-oneway", 1, ">"), ("road-oneway-rev", -1, "<")):
+    layer(_id, "symbol", "transportation", ["all", ["==", ["get", "oneway"], _val], ONEWAY_CLS],
+          minzoom=16, source="openmaptiles-labels",
+          layout={"symbol-placement": "line", "symbol-spacing": 150, "text-field": _txt,
+                  "text-font": FONT, "text-size": 12, "text-keep-upright": False,
+                  "text-rotation-alignment": "map"},
+          paint={"text-color": c("#8a8a92", "#9aa0aa")})
+HAS_SERVICE = ["has", "service"]
+layer("rail", "line", "transportation", ["all", cls("rail"), ["!", HAS_SERVICE]], minzoom=8,
+      layout={"line-join": "round"},
       paint={"line-color": c("#8a8a98", "#6f7280"), "line-dasharray": [4, 3],
              "line-width": zi((8, 0.6), (14, 1.2), (18, 2))})
+# yards, sidings and spurs: only when zoomed in, thinner, so they do not clutter the main lines
+layer("rail-service", "line", "transportation", ["all", cls("rail"), HAS_SERVICE], minzoom=13,
+      layout={"line-join": "round"},
+      paint={"line-color": c("#a9a9b6", "#575a66"), "line-dasharray": [3, 3],
+             "line-width": zi((13, 0.4), (16, 0.9), (18, 1.4))})
 layer("transit", "line", "transportation", cls("transit"), minzoom=11,
       paint={"line-color": c("#9a8fb5", "#7d7396"), "line-dasharray": [3, 2], "line-width": 1.1})
 layer("aerialway", "line", "transportation", cls("aerialway", "gondola", "cable_car", "chair_lift", "drag_lift",
@@ -232,6 +241,31 @@ layer("boundary-6", "line", "boundary", ["all", ["==", ["get", "admin_level"], 6
 layer("peak-dot", "circle", "mountain_peak", ["has", "name"], minzoom=8,
       paint={"circle-radius": 2.6, "circle-color": c("#8c6a4a", "#c49a6c"), "circle-stroke-width": 0.8,
              "circle-stroke-color": c("#ffffff", "#1c1f24")})
+# transport hubs are important when travelling: railway stations, bus stations, ferry terminals, cable-car
+# stations. They have their own layers (not touched by the POI category filter in the app).
+def _in(prop, *vals):
+    return ["match", ["get", prop], list(vals), True, False]
+
+
+ST_RAIL = ["all", ["has", "name"], _in("subclass", "station", "halt"), ["==", ["get", "class"], "railway"]]
+ST_SUBWAY = ["all", ["has", "name"], ["any", _in("subclass", "subway"), _in("class", "subway")]]
+ST_TRAM = ["all", ["has", "name"], _in("subclass", "tram_stop"), ["==", ["get", "class"], "railway"]]
+ST_BUS = ["all", ["has", "name"], _in("subclass", "bus_station")]
+ST_SEA = ["all", ["has", "name"], ["any", _in("subclass", "ferry_terminal"), _in("class", "ferry_terminal")]]
+ST_AERIAL = ["all", ["has", "name"], ["==", ["get", "class"], "aerialway"], _in("subclass", "station")]
+STATIONS = [  # id, filter, minzoom, dot colour (light, dark)
+    ("rail", ST_RAIL, 12, ("#c62828", "#ef7a7a")),
+    ("subway", ST_SUBWAY, 12, ("#6a1b9a", "#c08ae0")),
+    ("bus", ST_BUS, 13, ("#2e7d32", "#7fcf84")),
+    ("sea", ST_SEA, 12, ("#0277bd", "#6cc0ee")),
+    ("aerial", ST_AERIAL, 12, ("#6b5b95", "#a898d0")),
+    ("tram", ST_TRAM, 14, ("#ef6c00", "#f2a65a")),
+]
+for sid, flt, mz, col in STATIONS:
+    layer(f"station-dot-{sid}", "circle", "poi", flt, minzoom=mz,
+          paint={"circle-radius": zi((mz, 4), (16, 6.5), base=1), "circle-color": c(*col),
+                 "circle-stroke-width": 1.6, "circle-stroke-color": c("#ffffff", "#1c1f24")})
+
 layer("poi-dot", "circle", "poi", ["has", "name"], minzoom=15,
       paint={"circle-radius": 3, "circle-color": c("#8793a5", "#9aa7bb"), "circle-stroke-width": 1,
              "circle-stroke-color": c("#ffffff", "#1c1f24")})
@@ -275,6 +309,9 @@ label("lbl-road-minor", "transportation_name",
 label("lbl-peak", "mountain_peak", ["has", "name"], 8, zi((8, 10), (14, 12)), c("#7a5a3a", "#d3a574"),
       anchor="top", offset=[0, 0.5], sort=["-", 0, ["to-number", ["get", "ele"], 0]], width=7)
 label("lbl-poi", "poi", ["has", "name"], 15, 11, c("#5b6574", "#aab6c8"), anchor="top", offset=[0, 0.6], width=7)
+for sid, flt, mz, col in STATIONS:
+    label(f"lbl-station-{sid}", "poi", flt, mz, zi((mz, 10), (16, 12), base=1), c(*col), anchor="top",
+          offset=[0, 0.8], width=7, sort=0)
 label("lbl-aerodrome", "aerodrome_label", ["has", "name"], 8, 11, c("#556070", "#a0acc0"), anchor="top",
       offset=[0, 0.6])
 label("lbl-hamlet", "place", cls("hamlet", "neighbourhood", "isolated_dwelling"), 13, zi((13, 10), (16, 13)),

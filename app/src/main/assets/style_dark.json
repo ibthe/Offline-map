@@ -2778,21 +2778,79 @@
    }
   },
   {
+   "id": "road-oneway-rev",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "==",
+     [
+      "get",
+      "oneway"
+     ],
+     -1
+    ],
+    [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "minor",
+      "tertiary",
+      "secondary",
+      "primary",
+      "service"
+     ],
+     true,
+     false
+    ]
+   ],
+   "minzoom": 16,
+   "layout": {
+    "symbol-placement": "line",
+    "symbol-spacing": 150,
+    "text-field": "<",
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": 12,
+    "text-keep-upright": false,
+    "text-rotation-alignment": "map"
+   },
+   "paint": {
+    "text-color": "#9aa0aa"
+   }
+  },
+  {
    "id": "rail",
    "type": "line",
    "source": "openmaptiles",
    "source-layer": "transportation",
    "filter": [
-    "match",
+    "all",
     [
-     "get",
-     "class"
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "rail"
+     ],
+     true,
+     false
     ],
     [
-     "rail"
-    ],
-    true,
-    false
+     "!",
+     [
+      "has",
+      "service"
+     ]
+    ]
    ],
    "minzoom": 8,
    "layout": {
@@ -2819,6 +2877,58 @@
      1.2,
      18,
      2
+    ]
+   }
+  },
+  {
+   "id": "rail-service",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "filter": [
+    "all",
+    [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "rail"
+     ],
+     true,
+     false
+    ],
+    [
+     "has",
+     "service"
+    ]
+   ],
+   "minzoom": 13,
+   "layout": {
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#575a66",
+    "line-dasharray": [
+     3,
+     3
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     13,
+     0.4,
+     16,
+     0.9,
+     18,
+     1.4
     ]
    }
   },
@@ -3174,6 +3284,331 @@
     "circle-radius": 2.6,
     "circle-color": "#c49a6c",
     "circle-stroke-width": 0.8,
+    "circle-stroke-color": "#1c1f24"
+   }
+  },
+  {
+   "id": "station-dot-rail",
+   "type": "circle",
+   "source": "openmaptiles",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "station",
+      "halt"
+     ],
+     true,
+     false
+    ],
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "railway"
+    ]
+   ],
+   "minzoom": 12,
+   "paint": {
+    "circle-radius": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     4,
+     16,
+     6.5
+    ],
+    "circle-color": "#ef7a7a",
+    "circle-stroke-width": 1.6,
+    "circle-stroke-color": "#1c1f24"
+   }
+  },
+  {
+   "id": "station-dot-subway",
+   "type": "circle",
+   "source": "openmaptiles",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "any",
+     [
+      "match",
+      [
+       "get",
+       "subclass"
+      ],
+      [
+       "subway"
+      ],
+      true,
+      false
+     ],
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      [
+       "subway"
+      ],
+      true,
+      false
+     ]
+    ]
+   ],
+   "minzoom": 12,
+   "paint": {
+    "circle-radius": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     4,
+     16,
+     6.5
+    ],
+    "circle-color": "#c08ae0",
+    "circle-stroke-width": 1.6,
+    "circle-stroke-color": "#1c1f24"
+   }
+  },
+  {
+   "id": "station-dot-bus",
+   "type": "circle",
+   "source": "openmaptiles",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "bus_station"
+     ],
+     true,
+     false
+    ]
+   ],
+   "minzoom": 13,
+   "paint": {
+    "circle-radius": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     13,
+     4,
+     16,
+     6.5
+    ],
+    "circle-color": "#7fcf84",
+    "circle-stroke-width": 1.6,
+    "circle-stroke-color": "#1c1f24"
+   }
+  },
+  {
+   "id": "station-dot-sea",
+   "type": "circle",
+   "source": "openmaptiles",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "any",
+     [
+      "match",
+      [
+       "get",
+       "subclass"
+      ],
+      [
+       "ferry_terminal"
+      ],
+      true,
+      false
+     ],
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      [
+       "ferry_terminal"
+      ],
+      true,
+      false
+     ]
+    ]
+   ],
+   "minzoom": 12,
+   "paint": {
+    "circle-radius": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     4,
+     16,
+     6.5
+    ],
+    "circle-color": "#6cc0ee",
+    "circle-stroke-width": 1.6,
+    "circle-stroke-color": "#1c1f24"
+   }
+  },
+  {
+   "id": "station-dot-aerial",
+   "type": "circle",
+   "source": "openmaptiles",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "aerialway"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "station"
+     ],
+     true,
+     false
+    ]
+   ],
+   "minzoom": 12,
+   "paint": {
+    "circle-radius": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     4,
+     16,
+     6.5
+    ],
+    "circle-color": "#a898d0",
+    "circle-stroke-width": 1.6,
+    "circle-stroke-color": "#1c1f24"
+   }
+  },
+  {
+   "id": "station-dot-tram",
+   "type": "circle",
+   "source": "openmaptiles",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "tram_stop"
+     ],
+     true,
+     false
+    ],
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "railway"
+    ]
+   ],
+   "minzoom": 14,
+   "paint": {
+    "circle-radius": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     14,
+     4,
+     16,
+     6.5
+    ],
+    "circle-color": "#f2a65a",
+    "circle-stroke-width": 1.6,
     "circle-stroke-color": "#1c1f24"
    }
   },
@@ -3540,6 +3975,451 @@
    },
    "paint": {
     "text-color": "#aab6c8",
+    "text-halo-color": "rgba(16,19,24,0.9)",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "lbl-station-rail",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "station",
+      "halt"
+     ],
+     true,
+     false
+    ],
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "railway"
+    ]
+   ],
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "to-string",
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     10,
+     16,
+     12
+    ],
+    "text-max-width": 7,
+    "text-padding": 2,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "symbol-sort-key": 0
+   },
+   "paint": {
+    "text-color": "#ef7a7a",
+    "text-halo-color": "rgba(16,19,24,0.9)",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "lbl-station-subway",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "any",
+     [
+      "match",
+      [
+       "get",
+       "subclass"
+      ],
+      [
+       "subway"
+      ],
+      true,
+      false
+     ],
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      [
+       "subway"
+      ],
+      true,
+      false
+     ]
+    ]
+   ],
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "to-string",
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     10,
+     16,
+     12
+    ],
+    "text-max-width": 7,
+    "text-padding": 2,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "symbol-sort-key": 0
+   },
+   "paint": {
+    "text-color": "#c08ae0",
+    "text-halo-color": "rgba(16,19,24,0.9)",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "lbl-station-bus",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "bus_station"
+     ],
+     true,
+     false
+    ]
+   ],
+   "minzoom": 13,
+   "layout": {
+    "text-field": [
+     "to-string",
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     13,
+     10,
+     16,
+     12
+    ],
+    "text-max-width": 7,
+    "text-padding": 2,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "symbol-sort-key": 0
+   },
+   "paint": {
+    "text-color": "#7fcf84",
+    "text-halo-color": "rgba(16,19,24,0.9)",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "lbl-station-sea",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "any",
+     [
+      "match",
+      [
+       "get",
+       "subclass"
+      ],
+      [
+       "ferry_terminal"
+      ],
+      true,
+      false
+     ],
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      [
+       "ferry_terminal"
+      ],
+      true,
+      false
+     ]
+    ]
+   ],
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "to-string",
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     10,
+     16,
+     12
+    ],
+    "text-max-width": 7,
+    "text-padding": 2,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "symbol-sort-key": 0
+   },
+   "paint": {
+    "text-color": "#6cc0ee",
+    "text-halo-color": "rgba(16,19,24,0.9)",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "lbl-station-aerial",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "aerialway"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "station"
+     ],
+     true,
+     false
+    ]
+   ],
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "to-string",
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     10,
+     16,
+     12
+    ],
+    "text-max-width": 7,
+    "text-padding": 2,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "symbol-sort-key": 0
+   },
+   "paint": {
+    "text-color": "#a898d0",
+    "text-halo-color": "rgba(16,19,24,0.9)",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "lbl-station-tram",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
+   "source-layer": "poi",
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "match",
+     [
+      "get",
+      "subclass"
+     ],
+     [
+      "tram_stop"
+     ],
+     true,
+     false
+    ],
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "railway"
+    ]
+   ],
+   "minzoom": 14,
+   "layout": {
+    "text-field": [
+     "to-string",
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "NotoSans"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "exponential",
+      1
+     ],
+     [
+      "zoom"
+     ],
+     14,
+     10,
+     16,
+     12
+    ],
+    "text-max-width": 7,
+    "text-padding": 2,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "symbol-sort-key": 0
+   },
+   "paint": {
+    "text-color": "#f2a65a",
     "text-halo-color": "rgba(16,19,24,0.9)",
     "text-halo-width": 1.9
    }

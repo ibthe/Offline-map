@@ -15,6 +15,17 @@ print("reading zoom", Z)
 WANT = {"place", "poi", "mountain_peak", "aerodrome_label", "water_name"}
 PRIO = {"city": 0, "town": 1, "village": 2, "suburb": 3, "quarter": 3, "hamlet": 3, "neighbourhood": 3,
         "isolated_dwelling": 3, "island": 3, "state": 3, "province": 3}
+# transport hubs: ranked above ordinary POI and findable by a type word ("вокзал", "station", "აეროპორტი"...)
+HUB_PRIO = {"station": 5, "halt": 5, "subway": 5, "bus_station": 5, "ferry_terminal": 5, "tram_stop": 6, "bus_stop": 7}
+HUB_WORDS = {
+    "station": "вокзал станция ж/д железнодорожная railway station train რკინიგზის სადგური",
+    "halt": "платформа остановочный пункт ж/д railway halt train",
+    "subway": "метро станция metro subway მეტრო",
+    "bus_station": "автовокзал автостанция bus station ავტოსადგური",
+    "ferry_terminal": "паром порт причал ferry terminal port",
+    "tram_stop": "трамвай остановка tram stop",
+    "bus_stop": "остановка автобуса bus stop",
+}
 found = {}
 tiles = 0
 for zoom, x, row, blob in db.execute("select zoom_level, tile_column, tile_row, tile_data from tiles "
@@ -46,7 +57,10 @@ for zoom, x, row, blob in db.execute("select zoom_level, tile_column, tile_row, 
             elif lname == "water_name":
                 kind, prio = "water", 4
             else:
-                kind, prio = (sub or cls or "poi"), 6
+                kind = sub or cls or "poi"
+                if cls == "railway" and sub in ("station", "halt", "tram_stop", "subway"):
+                    kind = sub
+                prio = HUB_PRIO.get(kind, 6)
             lat, lon = mvt.tile_to_lonlat(zoom, x, y, px, py, extent)
             ele = props.get("ele")
             try:
@@ -67,7 +81,9 @@ create table places(id integer primary key, ka text, ru text, en text, s text,
 """)
 rows = []
 for (ka, ru, en, kind, cls, sub, prio, ele, lat, lon) in found.values():
-    s = "\n".join(t.lower() for t in (ka, ru, en) if t)
+    s = "\n".join(t.lower().replace("ё", "е") for t in (ka, ru, en) if t)
+    if kind in HUB_WORDS:   # type words go last, so a name match always sorts before a type-word match
+        s += "\n" + HUB_WORDS[kind]
     rows.append((ka, ru, en, s, kind, cls, sub, prio, ele, lat, lon))
 out.executemany("insert into places(ka,ru,en,s,kind,cls,sub,prio,ele,lat,lon) values (?,?,?,?,?,?,?,?,?,?,?)", rows)
 out.commit()

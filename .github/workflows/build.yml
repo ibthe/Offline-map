@@ -26,30 +26,40 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Map data (tiles, search index, relief) is rebuilt only when the tile tools change.
-      # Fonts and the style are NOT part of this cache: they are cheap and are rebuilt on every run.
-      # restore-keys also picks up the cache of older runs, so changing fonts/design never
-      # triggers the 30-60 minute tile build again.
-      - name: Cache map data
-        id: mapdata
+      # Tiles (30-60 min) are cached on the OSM/tile tools only. The search index and relief have their own
+      # exact-key caches: changing build_places.py rebuilds just places.db (fast) from the cached tiles.
+      # (Before, restore-keys silently restored an OLD places.db, so edits to the index never applied.)
+      - name: Cache tiles
+        id: cache_tiles
         uses: actions/cache@v4
         with:
-          path: |
-            app/src/main/assets/georgia.mbtiles
-            app/src/main/assets/places.db
-            app/src/main/assets/relief.mbtiles
-          key: mapdata-v3-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_relief.py') }}
+          path: app/src/main/assets/georgia.mbtiles
+          key: tiles-v1-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
           restore-keys: |
-            mapdata-v3-
-            mapdata-v2-
+            tiles-v1-
+
+      - name: Cache search index
+        id: cache_places
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/places.db
+          key: places-v1-${{ hashFiles('tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
+
+      - name: Cache relief
+        id: cache_relief
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/relief.mbtiles
+          key: relief-v1-${{ hashFiles('tools/build_relief.py') }}
 
       # decided once, before anything is built (a file check per step would change mid-run)
       - name: Decide what has to be rebuilt
         id: need
         run: |
           mkdir -p app/src/main/assets
-          [ -s app/src/main/assets/georgia.mbtiles ] || { echo "tiles=true" >> "$GITHUB_OUTPUT"; echo "places=true" >> "$GITHUB_OUTPUT"; }
-          [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
+          [ -s app/src/main/assets/georgia.mbtiles ] || echo "tiles=true" >> "$GITHUB_OUTPUT"
+          # places.db is exact-key cached: a miss (tool changed) or missing tiles means rebuild
+          [ "${{ steps.cache_places.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true

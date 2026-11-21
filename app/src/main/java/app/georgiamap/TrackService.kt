@@ -50,10 +50,6 @@ class TrackService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (db == null) db = UserDb(this)
         trackId = getSharedPreferences("settings", MODE_PRIVATE).getLong("rec_track", 0L)
-        if (trackId <= 0) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
         if (Build.VERSION.SDK_INT >= 26) {
             val ch = NotificationChannel(CHANNEL, "Запись трека", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
@@ -69,7 +65,12 @@ class TrackService : Service() {
             .setOngoing(true)
             .setContentIntent(open)
             .build()
+        // startForegroundService() requires startForeground() even if we stop right away (else ANR/crash)
         ServiceCompat.startForeground(this, 1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        if (trackId <= 0) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val manager = getSystemService(LOCATION_SERVICE) as LocationManager
         lm = manager

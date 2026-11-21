@@ -118,7 +118,7 @@ class PlaceDb(path: String) {
     fun count(): Int = db.rawQuery("select count(*) from places", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     fun search(query: String, limit: Int = 40): List<Place> {
-        val q = query.trim().lowercase().replace("%", "").replace("_", "")
+        val q = query.trim().lowercase().replace("ё", "е").replace("%", "").replace("_", "")
         if (q.isEmpty()) return emptyList()
         val out = ArrayList<Place>()
         db.rawQuery(
