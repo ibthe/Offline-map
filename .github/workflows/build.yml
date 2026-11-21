@@ -37,8 +37,7 @@ jobs:
         if: steps.mapdata.outputs.cache-hit != 'true'
         run: |
           mkdir -p data
-          curl -L --fail --retry 3 -o data/georgia.osm.pbf \
-            https://download.geofabrik.de/europe/georgia-latest.osm.pbf
+          python tools/fetch_osm.py data/georgia.osm.pbf
           ls -lh data/georgia.osm.pbf
 
       - name: Build vector tiles with Planetiler (OpenMapTiles schema)
