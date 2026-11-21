@@ -21,7 +21,6 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Xml
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
@@ -608,7 +607,6 @@ class MainActivity : AppCompatActivity() {
             "Перейти к координатам",
             "Экспорт GPX (точки и треки)",
             "Импорт GPX",
-            "Разговорник (ქართ / рус / eng)",
             "Справка",
             "Диагностика",
             "Простые подписи (отладка): " + if (prefs.getBoolean("labels_simple", false)) "вкл" else "выкл"
@@ -630,10 +628,9 @@ class MainActivity : AppCompatActivity() {
                 8 -> gotoCoordinatesDialog()
                 9 -> exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
                 10 -> importLauncher.launch(arrayOf("*/*"))
-                11 -> showPhrasebook()
-                12 -> showInfo()
-                13 -> showDiagnostics()
-                14 -> { prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply(); style?.let { applyLabels(it) } }
+                11 -> showInfo()
+                12 -> showDiagnostics()
+                13 -> { prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply(); style?.let { applyLabels(it) } }
             }
         }.show()
     }
@@ -846,23 +843,9 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ phrasebook, info, diagnostics
 
-    private fun showPhrasebook() {
-        val ph = Phrasebook.all
-        val items = ph.map { "${it.ru}  /  ${it.en}\n${it.ka}  [${it.tr}]" }.toTypedArray()
-        MaterialAlertDialogBuilder(this).setTitle("Разговорник").setItems(items) { _, i ->
-            val p = ph[i]
-            val tv = TextView(this)
-            tv.text = "${p.ka}\n\n${p.tr}\n\n${p.ru} · ${p.en}"
-            tv.textSize = 26f
-            tv.gravity = Gravity.CENTER
-            tv.setPadding(48, 48, 48, 48)
-            MaterialAlertDialogBuilder(this).setView(tv).setPositiveButton("OK", null).show()
-        }.setNegativeButton("Закрыть", null).show()
-    }
-
     private fun showInfo() {
         val msg = "Экстренные службы: 112 (единый номер).\n\n" +
-            "Карта, поиск, рельеф и разговорник работают без интернета. GPS тоже работает без сети.\n\n" +
+            "Карта, поиск и рельеф работают без интернета. GPS тоже работает без сети.\n\n" +
             "Горные дороги и перевалы (Омало, Ушгули, Абано и др.) зимой могут быть закрыты — на карте это не отражено. " +
             "Перед выездом уточняйте обстановку на месте.\n\n" +
             "Для долгой записи трека разрешите приложению работу в фоне и не закрывайте уведомление.\n\n" +
