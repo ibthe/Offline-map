@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      osm_url:
+        description: "Optional: direct link to a .osm.pbf of Georgia (country) if automatic download fails"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -35,6 +40,8 @@ jobs:
 
       - name: Download OSM extract of Georgia (Geofabrik)
         if: steps.mapdata.outputs.cache-hit != 'true'
+        env:
+          OSM_URL: ${{ github.event.inputs.osm_url }}
         run: |
           mkdir -p data
           python tools/fetch_osm.py data/georgia.osm.pbf
