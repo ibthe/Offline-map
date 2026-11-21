@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="panel">#F2212428</color>
+    <color name="panel_stroke">#33FFFFFF</color>
+    <color name="surface">#17191C</color>
+    <color name="dialog_bg">#26292E</color>
+    <color name="text_primary">#E7E2E6</color>
+    <color name="text_secondary">#B0B2BA</color>
+    <color name="hint">#8D8F98</color>
+
+    <color name="accent">#FFB3B1</color>
+    <color name="on_accent">#5E0F1A</color>
+    <color name="accent_container">#85202D</color>
+    <color name="on_accent_container">#FFDAD9</color>
+
+    <color name="crosshair">#FF6B6B</color>
+    <color name="crosshair_halo">#CC17191C</color>
+</resources>

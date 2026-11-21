@@ -75,10 +75,11 @@ layer("park-outline", "line", "park", minzoom=8, layout={"line-join": "round"},
 
 # relief shading (raster-dem built from terrain tiles); removed at runtime if relief.mbtiles is absent
 layer("relief-hillshade", "hillshade", source="relief",
-      paint={"hillshade-exaggeration": 0.55, "hillshade-illumination-direction": 315,
-             "hillshade-shadow-color": c("#4f4a3c", "#000000"),
+      paint={"hillshade-exaggeration": zi((5, 0.38), (9, 0.3), (13, 0.2), base=1),
+             "hillshade-illumination-direction": 315,
+             "hillshade-shadow-color": c("#5b5546", "#000000"),
              "hillshade-highlight-color": c("#ffffff", "#3a3f46"),
-             "hillshade-accent-color": c("#6b6454", "#000000")})
+             "hillshade-accent-color": c("#7a735f", "#000000")})
 
 WATER = c("#a9cdee", "#12243a")
 layer("water", "fill", "water", paint={"fill-color": WATER})
@@ -167,7 +168,7 @@ WHALO = c("rgba(200,226,246,0.9)", "rgba(10,24,40,0.88)")
 
 
 def label(id, sl, filter, minzoom, size, color, halo=None, maxzoom=None, line=False, anchor=None,
-          offset=None, sort=None, width=8, halo_w=1.5):
+          offset=None, sort=None, width=8, halo_w=1.9, spacing=None):
     lo = {"text-field": ["to-string", ["get", "name"]], "text-font": FONT, "text-size": size,
           "text-max-width": width, "text-padding": 2}
     if line:
@@ -178,6 +179,8 @@ def label(id, sl, filter, minzoom, size, color, halo=None, maxzoom=None, line=Fa
         lo["text-offset"] = offset
     if sort is not None:
         lo["symbol-sort-key"] = sort
+    if spacing:
+        lo["text-letter-spacing"] = spacing
     layer(id, "symbol", sl, filter, minzoom, maxzoom, layout=lo, source="openmaptiles-labels",
           paint={"text-color": color, "text-halo-color": halo or HALO, "text-halo-width": halo_w})
 
@@ -209,9 +212,9 @@ label("lbl-town", "place", cls("town"), 8, zi((8, 11), (12, 15)), c("#333333", "
 label("lbl-city", "place", cls("city"), 4, zi((4, 12), (8, 16), (12, 20)), c("#222222", "#f0f0f0"), sort=RANK)
 label("lbl-island", "place", cls("island"), 9, zi((9, 10), (13, 13)), c("#5a6b4a", "#a3b894"), sort=RANK)
 label("lbl-state", "place", cls("state", "province"), 4, zi((4, 10), (8, 14)), c("#7b6f93", "#b3a6cf"),
-      maxzoom=10, sort=RANK, width=7)
+      maxzoom=10, sort=RANK, width=7, spacing=0.08)
 label("lbl-country", "place", cls("country"), 2, zi((2, 11), (5, 15), (8, 22)), c("#4a4458", "#d6cfe6"),
-      maxzoom=9, sort=RANK, width=7)
+      maxzoom=9, sort=RANK, width=7, spacing=0.12)
 
 style = {
     "version": 8,

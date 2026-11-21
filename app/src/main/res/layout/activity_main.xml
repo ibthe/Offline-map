@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -8,130 +9,176 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- crosshair: the point shown in the info line and saved by "+ Точка" -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+    <!-- crosshair: the point shown in the info line and saved by "Точка" -->
+    <ImageView
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:layout_gravity="center"
-        android:text="+"
-        android:textColor="#D32F2F"
-        android:textSize="30sp" />
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_crosshair" />
 
+    <!-- top: search + coordinates -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:layout_margin="8dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="12dp"
         android:orientation="vertical">
 
-        <EditText
-            android:id="@+id/etSearch"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="?attr/colorSurface"
-            android:hint="@string/search_hint"
-            android:imeOptions="actionSearch"
-            android:inputType="text"
-            android:maxLines="1"
-            android:padding="12dp"
-            android:textColor="?attr/colorOnSurface"
-            android:textColorHint="#888888" />
+            android:layout_height="52dp"
+            android:background="@drawable/bg_panel_pill"
+            android:elevation="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginStart="16dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_search" />
+
+            <EditText
+                android:id="@+id/etSearch"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@null"
+                android:hint="@string/search_hint"
+                android:imeOptions="actionSearch"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="12dp"
+                android:paddingEnd="8dp"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/hint"
+                android:textSize="16sp" />
+
+            <ImageButton
+                android:id="@+id/btnClear"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/clear"
+                android:src="@drawable/ic_clear"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <ListView
             android:id="@+id/lvResults"
             android:layout_width="match_parent"
-            android:layout_height="260dp"
-            android:background="?attr/colorSurface"
+            android:layout_height="280dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_panel_list"
+            android:clipToOutline="true"
+            android:divider="@color/panel_stroke"
+            android:dividerHeight="1dp"
+            android:elevation="6dp"
+            android:outlineProvider="background"
             android:visibility="gone" />
 
         <TextView
             android:id="@+id/tvInfo"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:background="?attr/colorSurface"
-            android:padding="6dp"
-            android:textColor="?attr/colorOnSurface"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_panel"
+            android:elevation="3dp"
+            android:lineSpacingExtra="2dp"
+            android:paddingStart="12dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="7dp"
+            android:textColor="@color/text_primary"
             android:textSize="12sp" />
     </LinearLayout>
 
+    <!-- bottom: floating action bar. Icon over a one-line label, so no label is ever cut off -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="68dp"
         android:layout_gravity="bottom"
-        android:layout_marginStart="8dp"
-        android:layout_marginEnd="8dp"
-        android:layout_marginBottom="28dp"
-        android:orientation="horizontal">
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_panel_pill"
+        android:elevation="8dp"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp">
 
-        <com.google.android.material.button.MaterialButton
+        <LinearLayout
             android:id="@+id/btnMenu"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:maxLines="1"
-            android:minWidth="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:text="@string/btn_menu"
-            android:textSize="12sp" />
-        <com.google.android.material.button.MaterialButton
+            style="@style/BarItem"
+            android:contentDescription="@string/btn_menu">
+
+            <ImageView
+                style="@style/BarIcon"
+                android:src="@drawable/ic_menu" />
+
+            <TextView
+                style="@style/BarLabel"
+                android:text="@string/btn_menu" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/btnPoint"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:maxLines="1"
-            android:minWidth="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:text="@string/btn_point"
-            android:textSize="12sp" />
-        <com.google.android.material.button.MaterialButton
+            style="@style/BarItem"
+            android:contentDescription="@string/btn_point">
+
+            <ImageView
+                style="@style/BarIcon"
+                android:src="@drawable/ic_add_location" />
+
+            <TextView
+                style="@style/BarLabel"
+                android:text="@string/btn_point" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/btnLocation"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:maxLines="1"
-            android:minWidth="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:text="@string/btn_location"
-            android:textSize="12sp" />
-        <com.google.android.material.button.MaterialButton
+            style="@style/BarItem"
+            android:contentDescription="@string/btn_location">
+
+            <ImageView
+                style="@style/BarIcon"
+                android:src="@drawable/ic_my_location"
+                app:tint="?attr/colorPrimary" />
+
+            <TextView
+                style="@style/BarLabel"
+                android:text="@string/btn_location"
+                android:textColor="?attr/colorPrimary" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/btnFit"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="0dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:maxLines="1"
-            android:minWidth="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:text="@string/btn_fit"
-            android:textSize="12sp" />
+            style="@style/BarItem"
+            android:contentDescription="@string/btn_fit">
+
+            <ImageView
+                style="@style/BarIcon"
+                android:src="@drawable/ic_fit" />
+
+            <TextView
+                style="@style/BarLabel"
+                android:text="@string/btn_fit" />
+        </LinearLayout>
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/loading"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#F5F3EE"
+        android:background="?attr/colorSurface"
         android:clickable="true"
+        android:focusable="true"
         android:gravity="center"
         android:orientation="vertical"
         android:visibility="gone">
@@ -145,9 +192,11 @@
             android:id="@+id/loadingText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="24dp"
             android:layout_marginTop="16dp"
+            android:layout_marginEnd="24dp"
             android:gravity="center"
             android:text="@string/loading"
-            android:textColor="#333333" />
+            android:textColor="?attr/colorOnSurface" />
     </LinearLayout>
 </FrameLayout>

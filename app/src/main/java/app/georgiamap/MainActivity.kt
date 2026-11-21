@@ -23,8 +23,9 @@ import android.text.TextWatcher
 import android.util.Xml
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
-import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.ListView
 import android.widget.TextView
@@ -141,10 +142,15 @@ class MainActivity : AppCompatActivity() {
             toast("Скопировано")
         }
 
+        val btnClear = findViewById<View>(R.id.btnClear)
+        btnClear.setOnClickListener { etSearch.setText(""); etSearch.requestFocus() }
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: Editable?) = runSearch(s?.toString() ?: "")
+            override fun afterTextChanged(s: Editable?) {
+                btnClear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+                runSearch(s?.toString() ?: "")
+            }
         })
         lvResults.setOnItemClickListener { _, _, pos, _ ->
             val p = searchResults.getOrNull(pos) ?: return@setOnItemClickListener
@@ -446,10 +452,26 @@ class MainActivity : AppCompatActivity() {
         val items = searchResults.map { p ->
             val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
             val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
-            "$names\n$extra"
+            names to extra
         }
-        lvResults.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, items)
+        lvResults.adapter = ResultsAdapter(items)
+        val dp = resources.displayMetrics.density
+        lvResults.layoutParams = lvResults.layoutParams.apply {
+            height = minOf((items.size * 64 * dp).roundToInt(), (320 * dp).roundToInt())
+        }
         lvResults.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private inner class ResultsAdapter(private val items: List<Pair<String, String>>) : BaseAdapter() {
+        override fun getCount() = items.size
+        override fun getItem(position: Int) = items[position]
+        override fun getItemId(position: Int) = position.toLong()
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val v = convertView ?: layoutInflater.inflate(R.layout.item_result, parent, false)
+            v.findViewById<TextView>(R.id.resTitle).text = items[position].first
+            v.findViewById<TextView>(R.id.resSub).text = items[position].second
+            return v
+        }
     }
 
     private fun showSearchResult(p: PlaceDb.Place) {
@@ -629,7 +651,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showWaypoints() {
         val list = userDb.waypoints()
-        if (list.isEmpty()) { toast("Точек нет. Долгое нажатие на карту или кнопка «+ Точка»"); return }
+        if (list.isEmpty()) { toast("Точек нет. Долгое нажатие на карту или кнопка «Точка»"); return }
         val items = list.map { "${it.name}\n${Geo.fmtCoord(it.lat, it.lon)}" }.toTypedArray()
         MaterialAlertDialogBuilder(this).setTitle("Мои точки").setItems(items) { _, i ->
             val w = list[i]
@@ -841,9 +863,14 @@ class MainActivity : AppCompatActivity() {
         try {
             val files = assets.list("glyphs/NotoSans")?.size ?: 0
             sb.append("шрифты (glyphs) в APK: $files файлов\n")
-            for (f in listOf("0-255", "1024-1279", "4096-4351")) {
-                val n = try { assets.open("glyphs/NotoSans/$f.pbf").use { it.readBytes().size } } catch (e: Exception) { -1 }
-                sb.append("  $f.pbf: $n байт\n")
+            // a real font has many glyphs with ink in these ranges; a placeholder has almost none
+            for ((f, name, need) in listOf(
+                Triple("0-255", "латиница", 150), Triple("1024-1279", "кириллица", 200), Triple("4096-4351", "грузинский", 45)
+            )) {
+                val bytes = try { assets.open("glyphs/NotoSans/$f.pbf").use { it.readBytes() } } catch (e: Exception) { null }
+                if (bytes == null) { sb.append("  $name: файла нет ✗\n"); continue }
+                val ink = glyphsWithInk(bytes)
+                sb.append("  $name ($f): $ink глифов ${if (ink >= need) "✓" else "✗ (заглушка, не шрифт)"}\n")
             }
         } catch (e: Exception) { sb.append("шрифты: ошибка $e\n") }
 
@@ -864,6 +891,53 @@ class MainActivity : AppCompatActivity() {
         }
         MaterialAlertDialogBuilder(this).setTitle("Диагностика").setMessage(sb.toString())
             .setPositiveButton("OK", null).show()
+    }
+
+    /** Number of glyphs that have a bitmap in an SDF glyph file (glyphs.proto). */
+    private fun glyphsWithInk(data: ByteArray): Int {
+        var ink = 0
+        try {
+            forEachField(data, 0, data.size) { n, wt, _, s, e ->
+                if (n == 1 && wt == 2) forEachField(data, s, e) { n2, w2, _, s2, e2 ->
+                    if (n2 == 3 && w2 == 2) {
+                        var width = 0L
+                        var bitmap = false
+                        forEachField(data, s2, e2) { n3, w3, v3, s3, e3 ->
+                            if (n3 == 3 && w3 == 0) width = v3
+                            if (n3 == 2 && w3 == 2 && e3 > s3) bitmap = true
+                        }
+                        if (width > 0 && bitmap) ink++
+                    }
+                }
+            }
+        } catch (e: Exception) { return -1 }
+        return ink
+    }
+
+    private fun forEachField(b: ByteArray, from: Int, to: Int, cb: (Int, Int, Long, Int, Int) -> Unit) {
+        var p = from
+        fun vint(): Long {
+            var r = 0L
+            var shift = 0
+            while (p < to) {
+                val x = b[p++].toInt() and 0xFF
+                r = r or ((x and 0x7F).toLong() shl shift)
+                if ((x and 0x80) == 0) break
+                shift += 7
+            }
+            return r
+        }
+        while (p < to) {
+            val key = vint().toInt()
+            val num = key ushr 3
+            when (key and 7) {
+                0 -> cb(num, 0, vint(), 0, 0)
+                2 -> { val len = vint().toInt(); cb(num, 2, 0L, p, p + len); p += len }
+                1 -> p += 8
+                5 -> p += 4
+                else -> return
+            }
+        }
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()

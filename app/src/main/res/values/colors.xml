@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- floating panels over the map -->
+    <color name="panel">#F7FFFFFF</color>
+    <color name="panel_stroke">#1A000000</color>
+    <color name="surface">#FBF9F6</color>
+    <color name="dialog_bg">#FFFFFF</color>
+    <color name="text_primary">#1D1B1E</color>
+    <color name="text_secondary">#5F6068</color>
+    <color name="hint">#8A8B93</color>
+
+    <!-- accent: the red of the Georgian flag cross -->
+    <color name="accent">#A5192B</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="accent_container">#FFDAD9</color>
+    <color name="on_accent_container">#410007</color>
+
+    <color name="crosshair">#D32F2F</color>
+    <color name="crosshair_halo">#E6FFFFFF</color>
+</resources>
