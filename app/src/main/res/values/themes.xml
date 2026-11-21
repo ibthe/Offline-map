@@ -9,8 +9,9 @@
         <item name="colorOnSurfaceVariant">@color/text_secondary</item>
         <item name="colorSurfaceContainer">@color/dialog_bg</item>
         <item name="colorSurfaceContainerHigh">@color/dialog_bg</item>
-        <item name="android:statusBarColor">@color/surface</item>
-        <item name="android:navigationBarColor">@color/surface</item>
+        <!-- edge-to-edge: the map runs under transparent system bars -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">@bool/light_bars</item>
     </style>
 

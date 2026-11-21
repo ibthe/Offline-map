@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -9,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- crosshair: the point shown in the info chip and saved by "Точка" -->
+    <!-- crosshair: the point shown in the info chip and saved by the add-point button -->
     <ImageView
         android:layout_width="44dp"
         android:layout_height="44dp"
@@ -19,26 +20,27 @@
 
     <!-- top: search + coordinates -->
     <LinearLayout
+        android:id="@+id/topPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
         android:layout_marginStart="14dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="10dp"
         android:layout_marginEnd="14dp"
         android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="58dp"
             android:background="@drawable/bg_panel_pill"
-            android:elevation="8dp"
+            android:elevation="10dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <ImageView
                 android:layout_width="22dp"
                 android:layout_height="22dp"
-                android:layout_marginStart="18dp"
+                android:layout_marginStart="20dp"
                 android:importantForAccessibility="no"
                 android:src="@drawable/ic_search" />
 
@@ -48,12 +50,13 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:background="@null"
+                android:fontFamily="sans-serif-medium"
                 android:hint="@string/search_hint"
                 android:imeOptions="actionSearch"
                 android:importantForAutofill="no"
                 android:inputType="text"
                 android:maxLines="1"
-                android:paddingStart="12dp"
+                android:paddingStart="14dp"
                 android:paddingEnd="8dp"
                 android:textColor="@color/text_primary"
                 android:textColorHint="@color/hint"
@@ -63,8 +66,8 @@
                 android:id="@+id/btnClear"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
-                android:layout_marginEnd="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_icon_btn"
                 android:contentDescription="@string/clear"
                 android:src="@drawable/ic_clear"
                 android:visibility="gone" />
@@ -74,12 +77,12 @@
             android:id="@+id/lvResults"
             android:layout_width="match_parent"
             android:layout_height="280dp"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/bg_panel_list"
             android:clipToOutline="true"
-            android:divider="@color/panel_stroke"
+            android:divider="@color/divider_soft"
             android:dividerHeight="1dp"
-            android:elevation="10dp"
+            android:elevation="12dp"
             android:outlineProvider="background"
             android:visibility="gone" />
 
@@ -87,79 +90,91 @@
             android:id="@+id/tvInfo"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="6dp"
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_panel"
             android:elevation="4dp"
             android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.02"
             android:lineSpacingExtra="2dp"
-            android:paddingStart="12dp"
-            android:paddingTop="7dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="7dp"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- right: round map controls -->
+    <!-- right: one glass capsule with the map controls -->
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:id="@+id/controls"
+        android:layout_width="52dp"
         android:layout_height="wrap_content"
         android:layout_gravity="end|bottom"
         android:layout_marginEnd="14dp"
-        android:layout_marginBottom="96dp"
-        android:orientation="vertical">
+        android:layout_marginBottom="104dp"
+        android:background="@drawable/bg_capsule"
+        android:elevation="8dp"
+        android:orientation="vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
 
         <ImageButton
             android:id="@+id/btnFit"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="@drawable/bg_fab"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_icon_btn"
             android:contentDescription="@string/btn_fit"
-            android:elevation="6dp"
             android:src="@drawable/ic_fit" />
+
+        <View
+            android:layout_width="28dp"
+            android:layout_height="1dp"
+            android:layout_gravity="center_horizontal"
+            android:background="@color/divider_soft" />
 
         <ImageButton
             android:id="@+id/btnLocation"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_fab"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_icon_btn"
             android:contentDescription="@string/btn_location"
-            android:elevation="6dp"
             android:src="@drawable/ic_my_location"
             app:tint="@color/accent" />
     </LinearLayout>
 
-    <!-- bottom: menu + primary action -->
+    <!-- bottom: floating dock = menu + primary action -->
     <LinearLayout
+        android:id="@+id/bottomDock"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="68dp"
         android:layout_gravity="bottom"
         android:layout_marginStart="14dp"
         android:layout_marginEnd="14dp"
-        android:layout_marginBottom="22dp"
-        android:orientation="horizontal">
+        android:layout_marginBottom="18dp"
+        android:background="@drawable/bg_dock"
+        android:elevation="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="9dp">
 
         <ImageButton
             android:id="@+id/btnMenu"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:background="@drawable/bg_fab"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:background="@drawable/bg_icon_btn"
             android:contentDescription="@string/btn_menu"
-            android:elevation="8dp"
             android:src="@drawable/ic_menu" />
 
         <LinearLayout
             android:id="@+id/btnPoint"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:background="@drawable/bg_btn_primary"
             android:clickable="true"
             android:contentDescription="@string/btn_point"
-            android:elevation="8dp"
             android:focusable="true"
             android:gravity="center"
             android:orientation="horizontal">
@@ -176,6 +191,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
                 android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.01"
                 android:text="@string/btn_point"
                 android:textColor="@color/on_accent"
                 android:textSize="16sp" />
@@ -196,7 +212,8 @@
         <ProgressBar
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:indeterminate="true" />
+            android:indeterminate="true"
+            android:indeterminateTint="@color/accent" />
 
         <TextView
             android:id="@+id/loadingText"
@@ -205,6 +222,7 @@
             android:layout_marginStart="24dp"
             android:layout_marginTop="16dp"
             android:layout_marginEnd="24dp"
+            android:fontFamily="sans-serif-medium"
             android:gravity="center"
             android:text="@string/loading"
             android:textColor="?attr/colorOnSurface" />

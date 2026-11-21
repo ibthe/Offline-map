@@ -26,6 +26,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.BaseAdapter
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -33,6 +34,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.json.JSONArray
 import org.json.JSONObject
@@ -141,6 +145,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
         setContentView(R.layout.activity_main)
+        setupEdgeToEdge()
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE)
         userDb = UserDb(this)
@@ -207,6 +212,51 @@ class MainActivity : AppCompatActivity() {
         mapView.onSaveInstanceState(outState)
     }
 
+    // ============================================================ edge-to-edge
+
+    private var insetTop = 0
+    private var insetBottom = 0
+
+    private fun dp(v: Float) = (v * resources.displayMetrics.density).roundToInt()
+
+    /** Map runs under transparent system bars; floating panels are moved clear of them. */
+    private fun setupEdgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val root = findViewById<View>(R.id.root)
+        val top = findViewById<View>(R.id.topPanel)
+        val controls = findViewById<View>(R.id.controls)
+        val dock = findViewById<View>(R.id.bottomDock)
+        val lpTop = top.layoutParams as FrameLayout.LayoutParams
+        val lpCtl = controls.layoutParams as FrameLayout.LayoutParams
+        val lpDock = dock.layoutParams as FrameLayout.LayoutParams
+        val baseTop = lpTop.topMargin
+        val baseCtl = lpCtl.bottomMargin
+        val baseDock = lpDock.bottomMargin
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            insetTop = sb.top
+            insetBottom = sb.bottom
+            lpTop.topMargin = baseTop + sb.top
+            lpCtl.bottomMargin = baseCtl + sb.bottom
+            lpDock.bottomMargin = baseDock + sb.bottom
+            top.layoutParams = lpTop
+            controls.layoutParams = lpCtl
+            dock.layoutParams = lpDock
+            applyMapUiMargins()
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    /** Keeps the MapLibre logo, attribution and compass out from under the floating panels. */
+    private fun applyMapUiMargins() {
+        val ui = map?.uiSettings ?: return
+        val bottom = dp(104f) + insetBottom
+        ui.setLogoMargins(dp(14f), 0, 0, bottom)
+        ui.setAttributionMargins(dp(14f + 92f), 0, 0, bottom)
+        ui.setCompassMargins(0, dp(150f) + insetTop, dp(14f), 0)
+    }
+
     // ============================================================ data (assets -> files)
 
     private fun prepareData(onReady: () -> Unit) {
@@ -265,6 +315,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap(m: MapLibreMap) {
         map = m
+        applyMapUiMargins()
         m.setMinZoomPreference(4.0)
         m.setMaxZoomPreference(18.0)
         m.moveCamera(
