@@ -19,7 +19,10 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextWatcher
+import android.text.style.ForegroundColorSpan
 import android.util.Xml
 import android.view.View
 import android.view.ViewGroup
@@ -115,6 +118,37 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ lifecycle
 
+    /** Five colour themes. Each one has a UI overlay (res/values/palettes.xml) and its own map style file. */
+    private enum class Palette(val key: String, val title: String, val hint: String, val styleRes: Int, val swatch: Int) {
+        OCEAN("ocean", "Океан", "спокойствие и ясность", R.style.ThemeOverlay_Georgia_Ocean, 0xFF2A7FA8.toInt()),
+        FOREST("forest", "Лес", "естественный покой", R.style.ThemeOverlay_Georgia_Forest, 0xFF3F7D58.toInt()),
+        DUSK("dusk", "Закат", "тепло и уют", R.style.ThemeOverlay_Georgia_Dusk, 0xFFB2552F.toInt()),
+        LAVENDER("lavender", "Лаванда", "мягкая расслабленность", R.style.ThemeOverlay_Georgia_Lavender, 0xFF6B5BC4.toInt()),
+        GRAPHITE("graphite", "Графит", "нейтральный фокус", R.style.ThemeOverlay_Georgia_Graphite, 0xFF3D4A5C.toInt())
+    }
+
+    private fun palette(): Palette {
+        val k = getSharedPreferences("settings", MODE_PRIVATE).getString("palette", "ocean")
+        return Palette.values().firstOrNull { it.key == k } ?: Palette.OCEAN
+    }
+
+    private fun showPaletteDialog() {
+        val all = Palette.values()
+        val items = all.map {
+            SpannableString("●  ${it.title} — ${it.hint}").apply {
+                setSpan(ForegroundColorSpan(it.swatch), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }.toTypedArray<CharSequence>()
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Цветовая тема")
+            .setSingleChoiceItems(items, all.indexOf(palette())) { d, which ->
+                prefs.edit().putString("palette", all[which].key).apply()
+                d.dismiss()
+                recreate()   // UI overlay and map style are both rebuilt with the new palette
+            }
+            .setNegativeButton(android.R.string.cancel, null).show()
+    }
+
     /** "auto" follows the system, "light" / "dark" force the app UI and the map style. */
     private fun themeMode(): String {
         val sp = getSharedPreferences("settings", MODE_PRIVATE)
@@ -143,6 +177,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         applyThemeMode(themeMode())
         super.onCreate(savedInstanceState)
+        theme.applyStyle(palette().styleRes, true)   // colour theme, before any view is inflated
         MapLibre.getInstance(this)
         setContentView(R.layout.activity_main)
         setupEdgeToEdge()
@@ -251,10 +286,10 @@ class MainActivity : AppCompatActivity() {
     /** Keeps the MapLibre logo, attribution and compass out from under the floating panels. */
     private fun applyMapUiMargins() {
         val ui = map?.uiSettings ?: return
-        val bottom = dp(104f) + insetBottom
-        ui.setLogoMargins(dp(14f), 0, 0, bottom)
-        ui.setAttributionMargins(dp(14f + 92f), 0, 0, bottom)
-        ui.setCompassMargins(0, dp(150f) + insetTop, dp(14f), 0)
+        val bottom = dp(96f) + insetBottom           // dock margin 16 + dock 64 + gap 16
+        ui.setLogoMargins(dp(16f), 0, 0, bottom)
+        ui.setAttributionMargins(dp(16f + 88f), 0, 0, bottom)
+        ui.setCompassMargins(0, dp(16f + 56f + 8f + 48f + 8f) + insetTop, dp(16f), 0)   // under search + info chip
     }
 
     // ============================================================ data (assets -> files)
@@ -337,7 +372,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadStyle() {
         val m = map ?: return
         val tiles = tilesFile ?: return
-        val name = if (isNight()) "style_dark.json" else "style.json"
+        val name = "style_${palette().key}" + (if (isNight()) "_dark" else "") + ".json"
         val relief = File(filesDir, "relief.mbtiles")
         val obj = JSONObject(assets.open(name).bufferedReader().use { it.readText() })
         if (!relief.exists()) {
@@ -650,7 +685,8 @@ class MainActivity : AppCompatActivity() {
             "Языки названий ($langs)",
             "Категории POI",
             "Рельеф: " + if (!hasRelief) "нет данных" else if (prefs.getBoolean("relief_on", true)) "вкл" else "выкл",
-            "Тема: " + when (themeMode()) { "light" -> "светлая"; "dark" -> "тёмная"; else -> "как в системе" },
+            "Режим: " + when (themeMode()) { "light" -> "светлый"; "dark" -> "тёмный"; else -> "как в системе" },
+            "Цветовая тема: ${palette().title}",
             "Мои точки",
             if (rec) "■ Остановить запись трека" else "● Начать запись трека",
             "Мои треки",
@@ -672,16 +708,17 @@ class MainActivity : AppCompatActivity() {
                     prefs.edit().putString("theme_mode", next).apply()
                     applyThemeMode(next)   // recreates the activity: UI and map style both switch
                 }
-                4 -> showWaypoints()
-                5 -> toggleRecording()
-                6 -> showTracks()
-                7 -> { rulerOn = !rulerOn; if (!rulerOn) rulerPts.clear(); refreshRuler() }
-                8 -> gotoCoordinatesDialog()
-                9 -> exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
-                10 -> importLauncher.launch(arrayOf("*/*"))
-                11 -> showInfo()
-                12 -> showDiagnostics()
-                13 -> { prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply(); style?.let { applyLabels(it) } }
+                4 -> showPaletteDialog()
+                5 -> showWaypoints()
+                6 -> toggleRecording()
+                7 -> showTracks()
+                8 -> { rulerOn = !rulerOn; if (!rulerOn) rulerPts.clear(); refreshRuler() }
+                9 -> gotoCoordinatesDialog()
+                10 -> exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
+                11 -> importLauncher.launch(arrayOf("*/*"))
+                12 -> showInfo()
+                13 -> showDiagnostics()
+                14 -> { prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply(); style?.let { applyLabels(it) } }
             }
         }.show()
     }

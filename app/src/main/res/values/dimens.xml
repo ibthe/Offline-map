@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 4dp grid. Screen edge margin is identical on all four sides so the floating layer is symmetric. -->
+    <dimen name="space_1">4dp</dimen>
+    <dimen name="space_2">8dp</dimen>
+    <dimen name="space_3">12dp</dimen>
+    <dimen name="space_4">16dp</dimen>
+    <dimen name="space_5">24dp</dimen>
+    <dimen name="screen_margin">16dp</dimen>
+
+    <!-- touch targets and icon sizes -->
+    <dimen name="control">48dp</dimen>
+    <dimen name="control_lg">56dp</dimen>
+    <dimen name="icon">24dp</dimen>
+    <dimen name="dock_height">64dp</dimen>   <!-- 48 control + 2 x 8 padding -->
+    <dimen name="search_height">56dp</dimen>
+
+    <!-- corner radii: outer radius = inner radius + padding (concentric), pills = height / 2 -->
+    <dimen name="radius_sm">16dp</dimen>
+    <dimen name="radius_search">28dp</dimen> <!-- 56 / 2 -->
+    <dimen name="radius_dock">32dp</dimen>   <!-- 64 / 2 -->
+    <dimen name="radius_control">24dp</dimen><!-- 48 / 2 -->
+    <dimen name="radius_list">24dp</dimen>
+
+    <!-- elevation tiers -->
+    <dimen name="elev_1">4dp</dimen>
+    <dimen name="elev_2">8dp</dimen>
+    <dimen name="elev_3">12dp</dimen>
+</resources>

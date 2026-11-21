@@ -18,29 +18,30 @@
         android:importantForAccessibility="no"
         android:src="@drawable/ic_crosshair" />
 
-    <!-- top: search + coordinates -->
+    <!-- TOP: search (56) -> 8 -> results / info chip. Edge margin 16 = same as every other edge. -->
     <LinearLayout
         android:id="@+id/topPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:layout_marginStart="14dp"
-        android:layout_marginTop="10dp"
-        android:layout_marginEnd="14dp"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginTop="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
         android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="58dp"
+            android:layout_height="@dimen/search_height"
             android:background="@drawable/bg_panel_pill"
-            android:elevation="10dp"
+            android:elevation="@dimen/elev_3"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!-- 16 + 24 icon + 16 = the text starts on the 4dp grid, optically centred in the pill radius -->
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:layout_marginStart="20dp"
+                android:layout_width="@dimen/icon"
+                android:layout_height="@dimen/icon"
+                android:layout_marginStart="@dimen/space_4"
                 android:importantForAccessibility="no"
                 android:src="@drawable/ic_search" />
 
@@ -50,23 +51,22 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:background="@null"
-                android:fontFamily="sans-serif-medium"
                 android:hint="@string/search_hint"
                 android:imeOptions="actionSearch"
                 android:importantForAutofill="no"
                 android:inputType="text"
                 android:maxLines="1"
-                android:paddingStart="14dp"
-                android:paddingEnd="8dp"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/hint"
-                android:textSize="16sp" />
+                android:paddingStart="@dimen/space_3"
+                android:paddingEnd="@dimen/space_2"
+                android:textAppearance="@style/TextAppearance.Georgia.Title"
+                android:textColor="?attr/gmTextPrimary"
+                android:textColorHint="?attr/gmHint" />
 
             <ImageButton
                 android:id="@+id/btnClear"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="8dp"
+                android:layout_width="@dimen/control"
+                android:layout_height="@dimen/control"
+                android:layout_marginEnd="@dimen/space_1"
                 android:background="@drawable/bg_icon_btn"
                 android:contentDescription="@string/clear"
                 android:src="@drawable/ic_clear"
@@ -77,91 +77,87 @@
             android:id="@+id/lvResults"
             android:layout_width="match_parent"
             android:layout_height="280dp"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="@dimen/space_2"
             android:background="@drawable/bg_panel_list"
             android:clipToOutline="true"
-            android:divider="@color/divider_soft"
+            android:divider="?attr/gmDivider"
             android:dividerHeight="1dp"
-            android:elevation="12dp"
+            android:elevation="@dimen/elev_3"
             android:outlineProvider="background"
             android:visibility="gone" />
 
+        <!-- info chip shares the left edge of the search pill -->
         <TextView
             android:id="@+id/tvInfo"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="@dimen/space_2"
             android:background="@drawable/bg_panel"
-            android:elevation="4dp"
-            android:fontFamily="sans-serif-medium"
-            android:letterSpacing="0.02"
+            android:elevation="@dimen/elev_1"
             android:lineSpacingExtra="2dp"
-            android:paddingStart="14dp"
-            android:paddingTop="8dp"
-            android:paddingEnd="14dp"
-            android:paddingBottom="8dp"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:paddingStart="@dimen/space_3"
+            android:paddingTop="@dimen/space_2"
+            android:paddingEnd="@dimen/space_3"
+            android:paddingBottom="@dimen/space_2"
+            android:textAppearance="@style/TextAppearance.Georgia.Label"
+            android:textColor="?attr/gmTextSecondary" />
     </LinearLayout>
 
-    <!-- right: one glass capsule with the map controls -->
+    <!-- RIGHT: one capsule, 48 wide, 16 from the edge, 16 above the dock -->
     <LinearLayout
         android:id="@+id/controls"
-        android:layout_width="52dp"
+        android:layout_width="@dimen/control"
         android:layout_height="wrap_content"
         android:layout_gravity="end|bottom"
-        android:layout_marginEnd="14dp"
-        android:layout_marginBottom="104dp"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:layout_marginBottom="96dp"
         android:background="@drawable/bg_capsule"
-        android:elevation="8dp"
-        android:orientation="vertical"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp">
+        android:elevation="@dimen/elev_2"
+        android:orientation="vertical">
 
         <ImageButton
             android:id="@+id/btnFit"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
+            android:layout_width="@dimen/control"
+            android:layout_height="@dimen/control"
             android:background="@drawable/bg_icon_btn"
             android:contentDescription="@string/btn_fit"
             android:src="@drawable/ic_fit" />
 
         <View
-            android:layout_width="28dp"
+            android:layout_width="@dimen/space_5"
             android:layout_height="1dp"
             android:layout_gravity="center_horizontal"
-            android:background="@color/divider_soft" />
+            android:background="?attr/gmDivider" />
 
         <ImageButton
             android:id="@+id/btnLocation"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
+            android:layout_width="@dimen/control"
+            android:layout_height="@dimen/control"
             android:background="@drawable/bg_icon_btn"
             android:contentDescription="@string/btn_location"
             android:src="@drawable/ic_my_location"
-            app:tint="@color/accent" />
+            app:tint="?attr/gmAccent" />
     </LinearLayout>
 
-    <!-- bottom: floating dock = menu + primary action -->
+    <!-- BOTTOM: dock 64 = 8 + 48 + 8. Gap between the two controls = 8 = dock padding (one rhythm). -->
     <LinearLayout
         android:id="@+id/bottomDock"
         android:layout_width="match_parent"
-        android:layout_height="68dp"
+        android:layout_height="@dimen/dock_height"
         android:layout_gravity="bottom"
-        android:layout_marginStart="14dp"
-        android:layout_marginEnd="14dp"
-        android:layout_marginBottom="18dp"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:layout_marginBottom="@dimen/screen_margin"
         android:background="@drawable/bg_dock"
-        android:elevation="14dp"
+        android:elevation="@dimen/elev_3"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="9dp">
+        android:padding="@dimen/space_2">
 
         <ImageButton
             android:id="@+id/btnMenu"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
+            android:layout_width="@dimen/control"
+            android:layout_height="@dimen/control"
             android:background="@drawable/bg_icon_btn"
             android:contentDescription="@string/btn_menu"
             android:src="@drawable/ic_menu" />
@@ -169,8 +165,8 @@
         <LinearLayout
             android:id="@+id/btnPoint"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="8dp"
+            android:layout_height="@dimen/control"
+            android:layout_marginStart="@dimen/space_2"
             android:layout_weight="1"
             android:background="@drawable/bg_btn_primary"
             android:clickable="true"
@@ -180,21 +176,19 @@
             android:orientation="horizontal">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="@dimen/icon"
+                android:layout_height="@dimen/icon"
                 android:importantForAccessibility="no"
                 android:src="@drawable/ic_add_location"
-                app:tint="@color/on_accent" />
+                app:tint="?attr/gmOnAccent" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:fontFamily="sans-serif-medium"
-                android:letterSpacing="0.01"
+                android:layout_marginStart="@dimen/space_2"
                 android:text="@string/btn_point"
-                android:textColor="@color/on_accent"
-                android:textSize="16sp" />
+                android:textAppearance="@style/TextAppearance.Georgia.Title"
+                android:textColor="?attr/gmOnAccent" />
         </LinearLayout>
     </LinearLayout>
 
@@ -213,18 +207,18 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:indeterminate="true"
-            android:indeterminateTint="@color/accent" />
+            android:indeterminateTint="?attr/gmAccent" />
 
         <TextView
             android:id="@+id/loadingText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="24dp"
-            android:layout_marginTop="16dp"
-            android:layout_marginEnd="24dp"
-            android:fontFamily="sans-serif-medium"
+            android:layout_marginStart="@dimen/space_5"
+            android:layout_marginTop="@dimen/space_4"
+            android:layout_marginEnd="@dimen/space_5"
             android:gravity="center"
             android:text="@string/loading"
+            android:textAppearance="@style/TextAppearance.Georgia.Body"
             android:textColor="?attr/colorOnSurface" />
     </LinearLayout>
 </FrameLayout>

@@ -1,24 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- glass panels floating over the map -->
+    <!-- Ocean palette: defaults before a theme overlay is applied -->
+    <color name="surface">#F4F7F9</color>
     <color name="panel">#F2FFFFFF</color>
-    <color name="panel_stroke">#14101828</color>
+    <color name="panel_stroke">#1A14323F</color>
     <color name="fab_bg">#FAFFFFFF</color>
-    <color name="surface">#F5F6F8</color>
     <color name="dialog_bg">#FFFFFF</color>
-    <color name="text_primary">#0F1420</color>
-    <color name="text_secondary">#566074</color>
-    <color name="hint">#8B93A4</color>
-    <color name="icon_tint">#1B2233</color>
-    <color name="divider_soft">#12101828</color>
-
-    <!-- accent: electric indigo -> violet gradient -->
-    <color name="accent">#4B4EF0</color>
-    <color name="accent_end">#8A4DF5</color>
+    <color name="text_primary">#14212B</color>
+    <color name="text_secondary">#54656F</color>
+    <color name="hint">#8798A3</color>
+    <color name="icon_tint">#1E3340</color>
+    <color name="divider_soft">#12143240</color>
+    <color name="accent">#2A7FA8</color>
+    <color name="accent_end">#3FA6A0</color>
     <color name="on_accent">#FFFFFF</color>
-    <color name="accent_container">#E6E7FF</color>
-    <color name="on_accent_container">#0B0D5C</color>
-
-    <color name="crosshair">#EF2D56</color>
+    <color name="accent_container">#D9EEF6</color>
+    <color name="on_accent_container">#0B3345</color>
+    <color name="crosshair">#E5484D</color>
     <color name="crosshair_halo">#F2FFFFFF</color>
 </resources>

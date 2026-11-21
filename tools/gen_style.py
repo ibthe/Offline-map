@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Generates the map style (OpenMapTiles schema, fully offline).
-Usage: gen_style.py <out.json> [--dark]"""
-import json, sys
+Usage: gen_style.py <out.json> [--dark] [--palette=ocean|forest|dusk|lavender|graphite]
+"Ocean" is the base look; the other palettes re-colour it (vegetation, water, warm tones, neutrals) so the map
+matches the colour theme chosen in the app."""
+import colorsys, json, re, sys
 
 DARK = "--dark" in sys.argv
+PALETTE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--palette=")), "ocean")
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 SRC = "openmaptiles"
 FONT = ["NotoSans"]
@@ -279,7 +282,7 @@ WHALO = c("rgba(196,222,246,0.92)", "rgba(10,26,44,0.9)")
 def label(id, sl, filter, minzoom, size, color, halo=None, maxzoom=None, line=False, anchor=None,
           offset=None, sort=None, width=8, halo_w=1.9, spacing=None):
     lo = {"text-field": ["to-string", ["get", "name"]], "text-font": FONT, "text-size": size,
-          "text-max-width": width, "text-padding": 2}
+          "text-max-width": width, "text-padding": 2, "text-line-height": 1.25}
     if line:
         lo.update({"symbol-placement": "line", "symbol-spacing": 280, "text-max-angle": 35})
     if anchor:
@@ -328,6 +331,65 @@ label("lbl-state", "place", cls("state", "province"), 4, zi((4, 10), (8, 14)), c
 label("lbl-country", "place", cls("country"), 2, zi((2, 11), (5, 15), (8, 22)), c("#4a4458", "#d6cfe6"),
       maxzoom=9, sort=RANK, width=7, spacing=0.12)
 
+
+# ------------------------------------------------------------------ palettes
+# hue families of the base style: vegetation 60-170, water 175-250, warm (roads, sand, commercial) 10-60.
+# veg/water = (target hue, saturation multiplier); warm = (hue shift, saturation multiplier);
+# neutral = (hue, tint strength) for greys; bg = (light, dark) background colour.
+PALETTES = {
+    "ocean": None,
+    "forest": dict(veg=(108, 1.25), water=(198, 0.85), warm=(-2, 0.9), neutral=(95, 0.05),
+                   bg=("#edf1e8", "#12170f")),
+    "dusk": dict(veg=(74, 0.62), water=(194, 0.50), warm=(-5, 1.0), neutral=(32, 0.13),
+                 bg=("#f3ede3", "#181310")),
+    "lavender": dict(veg=(148, 0.55), water=(224, 0.85), warm=(4, 0.78), neutral=(268, 0.08),
+                     bg=("#efedf4", "#15131d")),
+    "graphite": dict(veg=(120, 0.20), water=(210, 0.55), warm=(0, 0.55), neutral=(215, 0.03), other=0.3,
+                     bg=("#eceeef", "#101113")),
+}
+HEX = re.compile(r"^#([0-9a-fA-F]{6})$")
+RGBA = re.compile(r"^rgba\((\d+),(\d+),(\d+),([\d.]+)\)$")
+
+
+def _xform(r, g, b, pal):
+    h, sat, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    hd = h * 360
+    cool_grey = 175 <= hd <= 250 and sat < 0.30 and v < 0.40     # dark-theme ground greys (bluish by default)
+    if sat < 0.10 or cool_grey:                      # greys: tint towards the palette's neutral hue
+        hd = pal["neutral"][0]
+        sat = min(max(sat, pal["neutral"][1]), 0.10 + pal["neutral"][1]) * pal.get("other", 1.0)
+    elif 60 <= hd <= 170:                            # vegetation
+        hd = pal["veg"][0] + (hd - 110) * 0.35
+        sat *= pal["veg"][1]
+    elif 175 <= hd <= 250:                           # water
+        hd = pal["water"][0] + (hd - 212) * 0.35
+        sat *= pal["water"][1]
+    elif 8 <= hd < 60:                               # warm: roads, sand, commercial
+        hd += pal["warm"][0]
+        sat *= pal["warm"][1]
+    else:                                            # boundaries, labels, everything else
+        sat *= pal.get("other", 1.0)
+    r2, g2, b2 = colorsys.hsv_to_rgb((hd % 360) / 360, min(1.0, sat), v)
+    return round(r2 * 255), round(g2 * 255), round(b2 * 255)
+
+
+def recolor(node, pal):
+    if isinstance(node, dict):
+        return {k: recolor(v, pal) for k, v in node.items()}
+    if isinstance(node, list):
+        return [recolor(v, pal) for v in node]
+    if isinstance(node, str):
+        m = HEX.match(node)
+        if m:
+            h = m.group(1)
+            return "#%02x%02x%02x" % _xform(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), pal)
+        m = RGBA.match(node.replace(" ", ""))
+        if m:
+            r, g, b = _xform(int(m.group(1)), int(m.group(2)), int(m.group(3)), pal)
+            return "rgba(%d,%d,%d,%s)" % (r, g, b, m.group(4))
+    return node
+
+
 style = {
     "version": 8,
     "name": "Georgia Offline" + (" Dark" if DARK else ""),
@@ -344,7 +406,17 @@ style = {
     "layers": L,
 }
 
-out = args[0] if args else "app/src/main/assets/style.json"
+pal = PALETTES.get(PALETTE)
+if PALETTE not in PALETTES:
+    sys.exit("unknown palette: " + PALETTE)
+if pal:
+    style = recolor(style, pal)
+    for l in style["layers"]:                         # the page colour itself is set explicitly
+        if l["id"] == "background":
+            l["paint"]["background-color"] = pal["bg"][1 if DARK else 0]
+    style["name"] = style["name"] + " " + PALETTE.capitalize()
+
+out = args[0] if args else "app/src/main/assets/style_ocean.json"
 with open(out, "w", encoding="utf-8") as f:
     json.dump(style, f, ensure_ascii=False, indent=1)
-print("wrote", out, len(L), "layers", "(dark)" if DARK else "")
+print("wrote", out, len(L), "layers", PALETTE, "(dark)" if DARK else "")

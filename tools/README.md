@@ -2,7 +2,7 @@
 
 | file | what it does |
 |---|---|
-| `gen_style.py` | writes `app/src/main/assets/style.json` (colors, roads, labels) |
+| `gen_style.py` | writes `style_<palette>[_dark].json` (colors, roads, labels); `--palette=ocean|forest|dusk|lavender|graphite` re-colours the base look |
 | `build_glyphs.py` | builds the label font (SDF `.pbf`) for Latin + Cyrillic + Georgian: tries GitHub glyph repos / TTF fonts / system fonts, judges every candidate by its number of real glyphs (not by file size) and fails the build if `თბილისი Тбилиси Tbilisi` cannot be drawn |
 | `check_tiles.py` | fails the build if the tiles have no `name:ka` / `name:ru` / English names |
 
