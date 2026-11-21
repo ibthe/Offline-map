@@ -9,7 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- crosshair: the point shown in the info line and saved by "Точка" -->
+    <!-- crosshair: the point shown in the info chip and saved by "Точка" -->
     <ImageView
         android:layout_width="44dp"
         android:layout_height="44dp"
@@ -22,23 +22,23 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:layout_marginStart="12dp"
-        android:layout_marginTop="10dp"
-        android:layout_marginEnd="12dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="14dp"
         android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="54dp"
             android:background="@drawable/bg_panel_pill"
-            android:elevation="6dp"
+            android:elevation="8dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_marginStart="16dp"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginStart="18dp"
                 android:importantForAccessibility="no"
                 android:src="@drawable/ic_search" />
 
@@ -63,7 +63,7 @@
                 android:id="@+id/btnClear"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
-                android:layout_marginEnd="4dp"
+                android:layout_marginEnd="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/clear"
                 android:src="@drawable/ic_clear"
@@ -74,12 +74,12 @@
             android:id="@+id/lvResults"
             android:layout_width="match_parent"
             android:layout_height="280dp"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:background="@drawable/bg_panel_list"
             android:clipToOutline="true"
             android:divider="@color/panel_stroke"
             android:dividerHeight="1dp"
-            android:elevation="6dp"
+            android:elevation="10dp"
             android:outlineProvider="background"
             android:visibility="gone" />
 
@@ -87,88 +87,98 @@
             android:id="@+id/tvInfo"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="10dp"
             android:background="@drawable/bg_panel"
-            android:elevation="3dp"
+            android:elevation="4dp"
+            android:fontFamily="sans-serif-medium"
             android:lineSpacingExtra="2dp"
             android:paddingStart="12dp"
             android:paddingTop="7dp"
             android:paddingEnd="12dp"
             android:paddingBottom="7dp"
-            android:textColor="@color/text_primary"
+            android:textColor="@color/text_secondary"
             android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- bottom: floating action bar. Icon over a one-line label, so no label is ever cut off -->
+    <!-- right: round map controls -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|bottom"
+        android:layout_marginEnd="14dp"
+        android:layout_marginBottom="96dp"
+        android:orientation="vertical">
+
+        <ImageButton
+            android:id="@+id/btnFit"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_fit"
+            android:elevation="6dp"
+            android:src="@drawable/ic_fit" />
+
+        <ImageButton
+            android:id="@+id/btnLocation"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_location"
+            android:elevation="6dp"
+            android:src="@drawable/ic_my_location"
+            app:tint="@color/accent" />
+    </LinearLayout>
+
+    <!-- bottom: menu + primary action -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="68dp"
+        android:layout_height="56dp"
         android:layout_gravity="bottom"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="16dp"
-        android:background="@drawable/bg_panel_pill"
-        android:elevation="8dp"
-        android:orientation="horizontal"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp">
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginBottom="22dp"
+        android:orientation="horizontal">
 
-        <LinearLayout
+        <ImageButton
             android:id="@+id/btnMenu"
-            style="@style/BarItem"
-            android:contentDescription="@string/btn_menu">
-
-            <ImageView
-                style="@style/BarIcon"
-                android:src="@drawable/ic_menu" />
-
-            <TextView
-                style="@style/BarLabel"
-                android:text="@string/btn_menu" />
-        </LinearLayout>
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_menu"
+            android:elevation="8dp"
+            android:src="@drawable/ic_menu" />
 
         <LinearLayout
             android:id="@+id/btnPoint"
-            style="@style/BarItem"
-            android:contentDescription="@string/btn_point">
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_btn_primary"
+            android:clickable="true"
+            android:contentDescription="@string/btn_point"
+            android:elevation="8dp"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="horizontal">
 
             <ImageView
-                style="@style/BarIcon"
-                android:src="@drawable/ic_add_location" />
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_add_location"
+                app:tint="@color/on_accent" />
 
             <TextView
-                style="@style/BarLabel"
-                android:text="@string/btn_point" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/btnLocation"
-            style="@style/BarItem"
-            android:contentDescription="@string/btn_location">
-
-            <ImageView
-                style="@style/BarIcon"
-                android:src="@drawable/ic_my_location"
-                app:tint="?attr/colorPrimary" />
-
-            <TextView
-                style="@style/BarLabel"
-                android:text="@string/btn_location"
-                android:textColor="?attr/colorPrimary" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/btnFit"
-            style="@style/BarItem"
-            android:contentDescription="@string/btn_fit">
-
-            <ImageView
-                style="@style/BarIcon"
-                android:src="@drawable/ic_fit" />
-
-            <TextView
-                style="@style/BarLabel"
-                android:text="@string/btn_fit" />
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/btn_point"
+                android:textColor="@color/on_accent"
+                android:textSize="16sp" />
         </LinearLayout>
     </LinearLayout>
 

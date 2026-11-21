@@ -1,20 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- floating panels over the map -->
-    <color name="panel">#F7FFFFFF</color>
-    <color name="panel_stroke">#1A000000</color>
-    <color name="surface">#FBF9F6</color>
+    <!-- glass panels floating over the map -->
+    <color name="panel">#EBFFFFFF</color>
+    <color name="panel_stroke">#14101828</color>
+    <color name="fab_bg">#F7FFFFFF</color>
+    <color name="surface">#F5F6F8</color>
     <color name="dialog_bg">#FFFFFF</color>
-    <color name="text_primary">#1D1B1E</color>
-    <color name="text_secondary">#5F6068</color>
-    <color name="hint">#8A8B93</color>
+    <color name="text_primary">#0F1420</color>
+    <color name="text_secondary">#566074</color>
+    <color name="hint">#8B93A4</color>
+    <color name="icon_tint">#1B2233</color>
 
-    <!-- accent: the red of the Georgian flag cross -->
-    <color name="accent">#A5192B</color>
+    <!-- accent: electric indigo -->
+    <color name="accent">#4B4EF0</color>
     <color name="on_accent">#FFFFFF</color>
-    <color name="accent_container">#FFDAD9</color>
-    <color name="on_accent_container">#410007</color>
+    <color name="accent_container">#E3E4FF</color>
+    <color name="on_accent_container">#0B0D5C</color>
 
-    <color name="crosshair">#D32F2F</color>
-    <color name="crosshair_halo">#E6FFFFFF</color>
+    <color name="crosshair">#EF2D56</color>
+    <color name="crosshair_halo">#F2FFFFFF</color>
 </resources>

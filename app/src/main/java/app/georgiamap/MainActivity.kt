@@ -32,6 +32,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.json.JSONArray
@@ -111,7 +112,33 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ lifecycle
 
+    /** "auto" follows the system, "light" / "dark" force the app UI and the map style. */
+    private fun themeMode(): String {
+        val sp = getSharedPreferences("settings", MODE_PRIVATE)
+        val m = sp.getString("theme_mode", null)
+        if (m != null) return m
+        return if (sp.getBoolean("dark_map", false)) "dark" else "auto"   // migrate the old toggle
+    }
+
+    private fun applyThemeMode(m: String) {
+        AppCompatDelegate.setDefaultNightMode(
+            when (m) {
+                "light" -> AppCompatDelegate.MODE_NIGHT_NO
+                "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+        )
+    }
+
+    private fun isNight(): Boolean = when (themeMode()) {
+        "dark" -> true
+        "light" -> false
+        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyThemeMode(themeMode())
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
         setContentView(R.layout.activity_main)
@@ -260,7 +287,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadStyle() {
         val m = map ?: return
         val tiles = tilesFile ?: return
-        val name = if (prefs.getBoolean("dark_map", false)) "style_dark.json" else "style.json"
+        val name = if (isNight()) "style_dark.json" else "style.json"
         val relief = File(filesDir, "relief.mbtiles")
         val obj = JSONObject(assets.open(name).bufferedReader().use { it.readText() })
         if (!relief.exists()) {
@@ -573,7 +600,7 @@ class MainActivity : AppCompatActivity() {
             "Языки названий ($langs)",
             "Категории POI",
             "Рельеф: " + if (!hasRelief) "нет данных" else if (prefs.getBoolean("relief_on", true)) "вкл" else "выкл",
-            "Тёмная карта: " + if (prefs.getBoolean("dark_map", false)) "вкл" else "выкл",
+            "Тема: " + when (themeMode()) { "light" -> "светлая"; "dark" -> "тёмная"; else -> "как в системе" },
             "Мои точки",
             if (rec) "■ Остановить запись трека" else "● Начать запись трека",
             "Мои треки",
@@ -591,7 +618,11 @@ class MainActivity : AppCompatActivity() {
                 0 -> showLanguageDialog()
                 1 -> showPoiDialog()
                 2 -> { prefs.edit().putBoolean("relief_on", !prefs.getBoolean("relief_on", true)).apply(); style?.let { applyRelief(it) } }
-                3 -> { prefs.edit().putBoolean("dark_map", !prefs.getBoolean("dark_map", false)).apply(); loadStyle() }
+                3 -> {
+                    val next = when (themeMode()) { "auto" -> "light"; "light" -> "dark"; else -> "auto" }
+                    prefs.edit().putString("theme_mode", next).apply()
+                    applyThemeMode(next)   // recreates the activity: UI and map style both switch
+                }
                 4 -> showWaypoints()
                 5 -> toggleRecording()
                 6 -> showTracks()

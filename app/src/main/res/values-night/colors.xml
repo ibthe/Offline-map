@@ -1,18 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="panel">#F2212428</color>
-    <color name="panel_stroke">#33FFFFFF</color>
-    <color name="surface">#17191C</color>
-    <color name="dialog_bg">#26292E</color>
-    <color name="text_primary">#E7E2E6</color>
-    <color name="text_secondary">#B0B2BA</color>
-    <color name="hint">#8D8F98</color>
+    <color name="panel">#EB161A22</color>
+    <color name="panel_stroke">#26FFFFFF</color>
+    <color name="fab_bg">#F21B2029</color>
+    <color name="surface">#0E1116</color>
+    <color name="dialog_bg">#1B202A</color>
+    <color name="text_primary">#EBEEF5</color>
+    <color name="text_secondary">#9EA7BA</color>
+    <color name="hint">#767F93</color>
+    <color name="icon_tint">#E2E6F0</color>
 
-    <color name="accent">#FFB3B1</color>
-    <color name="on_accent">#5E0F1A</color>
-    <color name="accent_container">#85202D</color>
-    <color name="on_accent_container">#FFDAD9</color>
+    <color name="accent">#9DA0FF</color>
+    <color name="on_accent">#10125E</color>
+    <color name="accent_container">#2D30A8</color>
+    <color name="on_accent_container">#E3E4FF</color>
 
-    <color name="crosshair">#FF6B6B</color>
-    <color name="crosshair_halo">#CC17191C</color>
+    <color name="crosshair">#FF5C7C</color>
+    <color name="crosshair_halo">#CC0E1116</color>
 </resources>

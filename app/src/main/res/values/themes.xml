@@ -15,39 +15,4 @@
     </style>
 
     <style name="Theme.GeorgiaMap" parent="Base.Theme.GeorgiaMap" />
-
-    <!-- bottom action bar -->
-    <style name="BarItem">
-        <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">match_parent</item>
-        <item name="android:layout_weight">1</item>
-        <item name="android:orientation">vertical</item>
-        <item name="android:gravity">center</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
-    </style>
-
-    <style name="BarIcon">
-        <item name="android:layout_width">24dp</item>
-        <item name="android:layout_height">24dp</item>
-        <item name="android:importantForAccessibility">no</item>
-    </style>
-
-    <style name="BarLabel">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">3dp</item>
-        <item name="android:gravity">center</item>
-        <item name="android:maxLines">1</item>
-        <item name="android:paddingStart">2dp</item>
-        <item name="android:paddingEnd">2dp</item>
-        <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">12sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="autoSizeTextType">uniform</item>
-        <item name="autoSizeMinTextSize">9sp</item>
-        <item name="autoSizeMaxTextSize">12sp</item>
-        <item name="autoSizeStepGranularity">0.5sp</item>
-    </style>
 </resources>
