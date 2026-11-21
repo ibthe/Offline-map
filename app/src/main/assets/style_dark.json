@@ -7,6 +7,10 @@
    "url": "__MBTILES_URL__",
    "attribution": "© OpenStreetMap contributors, © OpenMapTiles, © Natural Earth"
   },
+  "openmaptiles-labels": {
+   "type": "vector",
+   "url": "__MBTILES_URL__"
+  },
   "relief": {
    "type": "raster-dem",
    "url": "__RELIEF_URL__",
@@ -1655,7 +1659,7 @@
   {
    "id": "lbl-water",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "water_name",
    "filter": [
     "has",
@@ -1701,7 +1705,7 @@
   {
    "id": "lbl-waterway",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "waterway",
    "filter": [
     "all",
@@ -1763,7 +1767,7 @@
   {
    "id": "lbl-road-major",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "transportation_name",
    "filter": [
     "all",
@@ -1835,7 +1839,7 @@
   {
    "id": "lbl-road-minor",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "transportation_name",
    "filter": [
     "all",
@@ -1908,7 +1912,7 @@
   {
    "id": "lbl-peak",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "mountain_peak",
    "filter": [
     "has",
@@ -1969,7 +1973,7 @@
   {
    "id": "lbl-poi",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "poi",
    "filter": [
     "has",
@@ -2005,7 +2009,7 @@
   {
    "id": "lbl-aerodrome",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "aerodrome_label",
    "filter": [
     "has",
@@ -2041,7 +2045,7 @@
   {
    "id": "lbl-hamlet",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2103,7 +2107,7 @@
   {
    "id": "lbl-suburb",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2164,7 +2168,7 @@
   {
    "id": "lbl-village",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2224,7 +2228,7 @@
   {
    "id": "lbl-town",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2284,7 +2288,7 @@
   {
    "id": "lbl-city",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2346,7 +2350,7 @@
   {
    "id": "lbl-island",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2406,7 +2410,7 @@
   {
    "id": "lbl-state",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",
@@ -2468,7 +2472,7 @@
   {
    "id": "lbl-country",
    "type": "symbol",
-   "source": "openmaptiles",
+   "source": "openmaptiles-labels",
    "source-layer": "place",
    "filter": [
     "match",

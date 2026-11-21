@@ -178,7 +178,7 @@ def label(id, sl, filter, minzoom, size, color, halo=None, maxzoom=None, line=Fa
         lo["text-offset"] = offset
     if sort is not None:
         lo["symbol-sort-key"] = sort
-    layer(id, "symbol", sl, filter, minzoom, maxzoom, layout=lo,
+    layer(id, "symbol", sl, filter, minzoom, maxzoom, layout=lo, source="openmaptiles-labels",
           paint={"text-color": color, "text-halo-color": halo or HALO, "text-halo-width": halo_w})
 
 
@@ -219,6 +219,9 @@ style = {
     "sources": {
         SRC: {"type": "vector", "url": "__MBTILES_URL__",
               "attribution": "© OpenStreetMap contributors, © OpenMapTiles, © Natural Earth"},
+        # same tiles, second source: symbol layers wait for glyphs; keeping them apart means a glyph
+        # problem can never hide the roads/water/landcover of a tile
+        "openmaptiles-labels": {"type": "vector", "url": "__MBTILES_URL__"},
         "relief": {"type": "raster-dem", "url": "__RELIEF_URL__", "tileSize": 256, "encoding": "terrarium",
                    "attribution": "Terrain: Mapzen/AWS Terrain Tiles (SRTM, ASTER, others)"},
     },

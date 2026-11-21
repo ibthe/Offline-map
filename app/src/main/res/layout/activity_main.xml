@@ -56,46 +56,74 @@
     </LinearLayout>
 
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
         android:layout_marginBottom="28dp"
         android:orientation="horizontal">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnMenu"
             style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:layout_marginEnd="6dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:maxLines="1"
             android:minWidth="0dp"
-            android:text="@string/btn_menu" />
-
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="@string/btn_menu"
+            android:textSize="12sp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnPoint"
             style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:layout_marginEnd="6dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:maxLines="1"
             android:minWidth="0dp"
-            android:text="@string/btn_point" />
-
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="@string/btn_point"
+            android:textSize="12sp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnLocation"
             style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:layout_marginEnd="6dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:maxLines="1"
             android:minWidth="0dp"
-            android:text="@string/btn_location" />
-
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="@string/btn_location"
+            android:textSize="12sp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnFit"
             style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:maxLines="1"
             android:minWidth="0dp"
-            android:text="@string/btn_fit" />
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="@string/btn_fit"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <LinearLayout

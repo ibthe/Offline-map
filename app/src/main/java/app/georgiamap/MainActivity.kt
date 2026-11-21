@@ -288,9 +288,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyLabels(s: Style) {
         val langs = enabledLanguages()
+        val simple = prefs.getBoolean("labels_simple", false)
         for (layer in s.layers) {
             if (layer is SymbolLayer && layer.id.startsWith("lbl-")) {
-                if (langs.isEmpty()) {
+                if (simple) {
+                    layer.setProperties(
+                        PropertyFactory.visibility(Property.VISIBLE),
+                        PropertyFactory.textField(Expression.raw("[\"to-string\",[\"get\",\"name\"]]"))
+                    )
+                } else if (langs.isEmpty()) {
                     layer.setProperties(PropertyFactory.visibility(Property.NONE))
                 } else {
                     layer.setProperties(
@@ -555,7 +561,8 @@ class MainActivity : AppCompatActivity() {
             "Импорт GPX",
             "Разговорник (ქართ / рус / eng)",
             "Справка",
-            "Диагностика"
+            "Диагностика",
+            "Простые подписи (отладка): " + if (prefs.getBoolean("labels_simple", false)) "вкл" else "выкл"
         )
         MaterialAlertDialogBuilder(this).setItems(items) { _, which ->
             when (which) {
@@ -573,6 +580,7 @@ class MainActivity : AppCompatActivity() {
                 11 -> showPhrasebook()
                 12 -> showInfo()
                 13 -> showDiagnostics()
+                14 -> { prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply(); style?.let { applyLabels(it) } }
             }
         }.show()
     }
@@ -830,6 +838,14 @@ class MainActivity : AppCompatActivity() {
         } else sb.append("georgia.mbtiles: нет\n")
         sb.append("places.db: ").append(placeDb?.count()?.toString() ?: "нет").append(" мест\n")
         sb.append("relief: ").append(if (elevation != null) "есть" else "нет").append("\n")
+        try {
+            val files = assets.list("glyphs/NotoSans")?.size ?: 0
+            sb.append("шрифты (glyphs) в APK: $files файлов\n")
+            for (f in listOf("0-255", "1024-1279", "4096-4351")) {
+                val n = try { assets.open("glyphs/NotoSans/$f.pbf").use { it.readBytes().size } } catch (e: Exception) { -1 }
+                sb.append("  $f.pbf: $n байт\n")
+            }
+        } catch (e: Exception) { sb.append("шрифты: ошибка $e\n") }
 
         val m = map
         val v = mapView
@@ -837,7 +853,7 @@ class MainActivity : AppCompatActivity() {
             sb.append("\nОтрисованные объекты на экране:\n")
             val rect = RectF(0f, 0f, v.width.toFloat(), v.height.toFloat())
             for (id in listOf("water", "landcover-wood", "landuse-residential", "road-primary", "road-minor",
-                "road-path", "building", "boundary-2", "boundary-4", "lbl-city", "lbl-village", "lbl-peak")) {
+                "road-path", "building", "boundary-2", "boundary-4", "lbl-city", "lbl-town", "lbl-village", "lbl-peak", "lbl-road-major")) {
                 val n = try { m.queryRenderedFeatures(rect, id).size } catch (e: Exception) { -1 }
                 sb.append("  $id: $n\n")
             }
