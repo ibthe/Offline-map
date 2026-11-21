@@ -1,8 +1,10 @@
 <resources>
     <string name="app_name">Georgia Offline Map</string>
-    <string name="btn_lang">Языки</string>
+    <string name="btn_menu">Меню</string>
+    <string name="btn_point">+ Точка</string>
     <string name="btn_location">Я здесь</string>
     <string name="btn_fit">Вся Грузия</string>
+    <string name="search_hint">Поиск: თბილისი · Тбилиси · Tbilisi</string>
     <string name="dialog_title">Языки названий на карте</string>
     <string name="loading">Подготовка карты (первый запуск)…</string>
     <string name="no_location">Нет доступа к геолокации</string>

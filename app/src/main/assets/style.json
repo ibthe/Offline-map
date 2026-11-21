@@ -6,6 +6,13 @@
    "type": "vector",
    "url": "__MBTILES_URL__",
    "attribution": "© OpenStreetMap contributors, © OpenMapTiles, © Natural Earth"
+  },
+  "relief": {
+   "type": "raster-dem",
+   "url": "__RELIEF_URL__",
+   "tileSize": 256,
+   "encoding": "terrarium",
+   "attribution": "Terrain: Mapzen/AWS Terrain Tiles (SRTM, ASTER, others)"
   }
  },
  "glyphs": "asset://glyphs/{fontstack}/{range}.pbf",
@@ -355,6 +362,18 @@
      4,
      2
     ]
+   }
+  },
+  {
+   "id": "relief-hillshade",
+   "type": "hillshade",
+   "source": "relief",
+   "paint": {
+    "hillshade-exaggeration": 0.55,
+    "hillshade-illumination-direction": 315,
+    "hillshade-shadow-color": "#4f4a3c",
+    "hillshade-highlight-color": "#ffffff",
+    "hillshade-accent-color": "#6b6454"
    }
   },
   {

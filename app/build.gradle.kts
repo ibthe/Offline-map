@@ -13,7 +13,7 @@ android {
         targetSdk = 34
         // CI passes -Pvcode=<run number>, so every new build re-extracts the map data
         versionCode = (project.findProperty("vcode") as String?)?.toIntOrNull() ?: 1
-        versionName = "1.0"
+        versionName = "2.0"
     }
 
     buildFeatures {
@@ -30,7 +30,7 @@ android {
 
     // keep the big tile database uncompressed inside the APK (fast copy on first launch)
     androidResources {
-        noCompress += listOf("mbtiles")
+        noCompress += listOf("mbtiles", "db")
     }
 }
 

@@ -28,8 +28,10 @@ jobs:
         with:
           path: |
             app/src/main/assets/georgia.mbtiles
+            app/src/main/assets/places.db
+            app/src/main/assets/relief.mbtiles
             app/src/main/assets/glyphs
-          key: mapdata-v1-${{ hashFiles('tools/**', '.github/workflows/build.yml') }}
+          key: mapdata-v2-${{ hashFiles('tools/**', '.github/workflows/build.yml') }}
 
       - name: Download OSM extract of Georgia (Geofabrik)
         if: steps.mapdata.outputs.cache-hit != 'true'
@@ -53,16 +55,32 @@ jobs:
             --maxzoom=14
           ls -lh app/src/main/assets/georgia.mbtiles
 
-      - name: Check that tiles contain ka / ru / en names
+      - name: Normalize MBTiles and verify tile content (layers, ka/ru/en names)
         if: steps.mapdata.outputs.cache-hit != 'true'
-        run: python tools/check_tiles.py app/src/main/assets/georgia.mbtiles
+        working-directory: tools
+        run: |
+          python finalize_tiles.py ../app/src/main/assets/georgia.mbtiles
+          python check_tiles.py ../app/src/main/assets/georgia.mbtiles
+
+      - name: Build offline search index
+        if: steps.mapdata.outputs.cache-hit != 'true'
+        working-directory: tools
+        run: python build_places.py ../app/src/main/assets/georgia.mbtiles ../app/src/main/assets/places.db
+
+      - name: Build relief tiles (hillshade + elevation readout)
+        if: steps.mapdata.outputs.cache-hit != 'true'
+        continue-on-error: true
+        working-directory: tools
+        run: python build_relief.py ../app/src/main/assets/relief.mbtiles
 
       - name: Download label fonts (glyphs) for Latin + Cyrillic + Georgian
         if: steps.mapdata.outputs.cache-hit != 'true'
         run: python tools/build_glyphs.py app/src/main/assets/glyphs/NotoSans
 
       - name: Generate map style
-        run: python tools/gen_style.py app/src/main/assets/style.json
+        run: |
+          python tools/gen_style.py app/src/main/assets/style.json
+          python tools/gen_style.py app/src/main/assets/style_dark.json --dark
 
       - uses: gradle/actions/setup-gradle@v4
         with:

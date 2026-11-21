@@ -8,6 +8,53 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- crosshair: the point shown in the info line and saved by "+ Точка" -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="+"
+        android:textColor="#D32F2F"
+        android:textSize="30sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_margin="8dp"
+        android:orientation="vertical">
+
+        <EditText
+            android:id="@+id/etSearch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/colorSurface"
+            android:hint="@string/search_hint"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:maxLines="1"
+            android:padding="12dp"
+            android:textColor="?attr/colorOnSurface"
+            android:textColorHint="#888888" />
+
+        <ListView
+            android:id="@+id/lvResults"
+            android:layout_width="match_parent"
+            android:layout_height="260dp"
+            android:background="?attr/colorSurface"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="?attr/colorSurface"
+            android:padding="6dp"
+            android:textColor="?attr/colorOnSurface"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -16,27 +63,39 @@
         android:orientation="horizontal">
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnLang"
+            android:id="@+id/btnMenu"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="@string/btn_lang" />
+            android:layout_marginEnd="6dp"
+            android:minWidth="0dp"
+            android:text="@string/btn_menu" />
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnFit"
+            android:id="@+id/btnPoint"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="@string/btn_fit" />
+            android:layout_marginEnd="6dp"
+            android:minWidth="0dp"
+            android:text="@string/btn_point" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnLocation"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:minWidth="0dp"
             android:text="@string/btn_location" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnFit"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:text="@string/btn_fit" />
     </LinearLayout>
 
     <LinearLayout
@@ -59,6 +118,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:gravity="center"
             android:text="@string/loading"
             android:textColor="#333333" />
     </LinearLayout>
