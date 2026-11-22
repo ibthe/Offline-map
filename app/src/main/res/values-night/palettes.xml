@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- five colour themes; the same style names exist in values/ (light) and values-night/ (dark) -->
-    <style name="ThemeOverlay.Georgia.Ocean">
+    <style name="ThemeOverlay.Georgia.Ocean" parent="">
         <item name="gmPanel">#EE111B21</item>
         <item name="gmPanelStroke">#2AFFFFFF</item>
         <item name="gmFab">#F2152028</item>
@@ -31,7 +31,7 @@
         <item name="colorSurfaceContainerHigh">#17222A</item>
         <item name="colorSurfaceContainerHighest">#17222A</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Forest">
+    <style name="ThemeOverlay.Georgia.Forest" parent="">
         <item name="gmPanel">#EE121A14</item>
         <item name="gmPanelStroke">#2AFFFFFF</item>
         <item name="gmFab">#F2161F18</item>
@@ -61,7 +61,7 @@
         <item name="colorSurfaceContainerHigh">#18211B</item>
         <item name="colorSurfaceContainerHighest">#18211B</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Dusk">
+    <style name="ThemeOverlay.Georgia.Dusk" parent="">
         <item name="gmPanel">#EE1D1714</item>
         <item name="gmPanelStroke">#2AFFFFFF</item>
         <item name="gmFab">#F2211A16</item>
@@ -91,7 +91,7 @@
         <item name="colorSurfaceContainerHigh">#231C18</item>
         <item name="colorSurfaceContainerHighest">#231C18</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Lavender">
+    <style name="ThemeOverlay.Georgia.Lavender" parent="">
         <item name="gmPanel">#EE17141F</item>
         <item name="gmPanelStroke">#2AFFFFFF</item>
         <item name="gmFab">#F21B1824</item>
@@ -121,7 +121,7 @@
         <item name="colorSurfaceContainerHigh">#1E1A29</item>
         <item name="colorSurfaceContainerHighest">#1E1A29</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Graphite">
+    <style name="ThemeOverlay.Georgia.Graphite" parent="">
         <item name="gmPanel">#EE141619</item>
         <item name="gmPanelStroke">#2AFFFFFF</item>
         <item name="gmFab">#F2181A1E</item>

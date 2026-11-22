@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- five colour themes; the same style names exist in values/ (light) and values-night/ (dark) -->
-    <style name="ThemeOverlay.Georgia.Ocean">
+    <style name="ThemeOverlay.Georgia.Ocean" parent="">
         <item name="gmPanel">#F2FFFFFF</item>
         <item name="gmPanelStroke">#1A14323F</item>
         <item name="gmFab">#FAFFFFFF</item>
@@ -31,7 +31,7 @@
         <item name="colorSurfaceContainerHigh">#FFFFFF</item>
         <item name="colorSurfaceContainerHighest">#FFFFFF</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Forest">
+    <style name="ThemeOverlay.Georgia.Forest" parent="">
         <item name="gmPanel">#F2FCFDF9</item>
         <item name="gmPanelStroke">#1A1F3322</item>
         <item name="gmFab">#FAFFFFFF</item>
@@ -61,7 +61,7 @@
         <item name="colorSurfaceContainerHigh">#FFFFFF</item>
         <item name="colorSurfaceContainerHighest">#FFFFFF</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Dusk">
+    <style name="ThemeOverlay.Georgia.Dusk" parent="">
         <item name="gmPanel">#F2FFFBF5</item>
         <item name="gmPanelStroke">#1A402A18</item>
         <item name="gmFab">#FAFFFCF8</item>
@@ -91,7 +91,7 @@
         <item name="colorSurfaceContainerHigh">#FFFCF8</item>
         <item name="colorSurfaceContainerHighest">#FFFCF8</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Lavender">
+    <style name="ThemeOverlay.Georgia.Lavender" parent="">
         <item name="gmPanel">#F2FDFCFF</item>
         <item name="gmPanelStroke">#1A2B2740</item>
         <item name="gmFab">#FAFFFFFF</item>
@@ -121,7 +121,7 @@
         <item name="colorSurfaceContainerHigh">#FFFFFF</item>
         <item name="colorSurfaceContainerHighest">#FFFFFF</item>
     </style>
-    <style name="ThemeOverlay.Georgia.Graphite">
+    <style name="ThemeOverlay.Georgia.Graphite" parent="">
         <item name="gmPanel">#F2FFFFFF</item>
         <item name="gmPanelStroke">#1A22272D</item>
         <item name="gmFab">#FAFFFFFF</item>
