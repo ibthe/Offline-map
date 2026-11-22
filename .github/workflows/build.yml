@@ -52,6 +52,13 @@ jobs:
           path: app/src/main/assets/relief.mbtiles
           key: relief-v1-${{ hashFiles('tools/build_relief.py') }}
 
+      - name: Cache road graph (navigator)
+        id: cache_routing
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/routing.bin
+          key: routing-v1-${{ hashFiles('tools/build_routing.py', 'tools/fetch_osm.py') }}
+
       # decided once, before anything is built (a file check per step would change mid-run)
       - name: Decide what has to be rebuilt
         id: need
@@ -61,11 +68,12 @@ jobs:
           # places.db is exact-key cached: a miss (tool changed) or missing tiles means rebuild
           [ "${{ steps.cache_places.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
+          [ "${{ steps.cache_routing.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/routing.bin ] || echo "routing=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
 
       - name: Download OSM extract of Georgia (Geofabrik)
-        if: steps.need.outputs.tiles == 'true'
+        if: steps.need.outputs.tiles == 'true' || steps.need.outputs.routing == 'true'
         env:
           OSM_URL: ${{ github.event.inputs.osm_url }}
         run: |
@@ -98,6 +106,15 @@ jobs:
         if: steps.need.outputs.places == 'true'
         working-directory: tools
         run: python build_places.py ../app/src/main/assets/georgia.mbtiles ../app/src/main/assets/places.db
+
+      # Road graph for the offline navigator (car / foot / bike). Optional: without it the app simply has no routing.
+      - name: Build road graph for the navigator
+        if: steps.need.outputs.routing == 'true'
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet osmium numpy
+          python tools/build_routing.py data/georgia.osm.pbf app/src/main/assets/routing.bin
+          ls -lh app/src/main/assets/routing.bin
 
       - name: Build relief tiles (hillshade + elevation readout)
         if: steps.need.outputs.relief == 'true'

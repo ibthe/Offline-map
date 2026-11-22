@@ -20,3 +20,6 @@ Each source is scored by the number of glyphs with ink in the Latin / Cyrillic /
 To force your own font, drop `NotoSans-Regular.ttf` and `NotoSansGeorgian-Regular.ttf` (any TTF/OTF that
 covers the scripts) into `tools/fonts/` - they are used before anything is downloaded.
 In the app: Menu -> Diagnostics shows the glyph count per script (a mark means OK, a cross means placeholder).
+
+| `build_routing.py` | builds `routing.bin` (road graph for the offline navigator) from the OSM extract; needs `pip install osmium numpy` |
+| `tests/` | synthetic OSM map + Kotlin check program for the router |

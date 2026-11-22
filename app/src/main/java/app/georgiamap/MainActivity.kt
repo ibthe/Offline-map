@@ -18,14 +18,17 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.text.Editable
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
+import android.util.TypedValue
 import android.util.Xml
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.BaseAdapter
 import android.widget.EditText
@@ -33,6 +36,7 @@ import android.widget.FrameLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
@@ -60,6 +64,8 @@ import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.channels.FileChannel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,6 +97,23 @@ class MainActivity : AppCompatActivity() {
     private var rulerOn = false
     private val rulerPts = ArrayList<LatLng>()
     private var shownTrackId = -1L
+
+    // navigator
+    private enum class NavMode { IDLE, PLACE, PREVIEW, ACTIVE }
+    private var navMode = NavMode.IDLE
+    private var navDest: LatLng? = null
+    private var navDestName = ""
+    private var navProfile = Profile.CAR
+    @Volatile private var graph: RoadGraph? = null
+    private var graphLoading = false
+    private var session: NavSession? = null
+    private var routeFrom: LatLng? = null
+    private var offCount = 0
+    private var lastReroute = 0L
+    private var rerouting = false
+    private val announced = HashSet<String>()
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
 
     private var myLoc: Location? = null
     private var following = false
@@ -208,6 +231,25 @@ class MainActivity : AppCompatActivity() {
             toast("Скопировано")
         }
 
+        navProfile = prefs.getInt("nav_profile", Profile.CAR)
+        findViewById<View>(R.id.btnNavClose).setOnClickListener { stopNav() }
+        findViewById<View>(R.id.btnNavGo).setOnClickListener {
+            when (navMode) {
+                NavMode.PLACE -> planRoute()
+                NavMode.PREVIEW -> startNav()
+                NavMode.ACTIVE -> stopNav()
+                NavMode.IDLE -> {}
+            }
+        }
+        findViewById<View>(R.id.navProfCar).setOnClickListener { chooseProfile(Profile.CAR) }
+        findViewById<View>(R.id.navProfFoot).setOnClickListener { chooseProfile(Profile.FOOT) }
+        findViewById<View>(R.id.navProfBike).setOnClickListener { chooseProfile(Profile.BIKE) }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (navMode != NavMode.IDLE) stopNav() else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+            }
+        })
+
         val btnClear = findViewById<View>(R.id.btnClear)
         btnClear.setOnClickListener { etSearch.setText(""); etSearch.requestFocus() }
         etSearch.addTextChangedListener(object : TextWatcher {
@@ -241,7 +283,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
     override fun onStop() { stopLocationUpdates(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
-    override fun onDestroy() { mapView.onDestroy(); super.onDestroy() }
+    override fun onDestroy() { tts?.shutdown(); mapView.onDestroy(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
@@ -258,29 +300,32 @@ class MainActivity : AppCompatActivity() {
     private fun setupEdgeToEdge() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val root = findViewById<View>(R.id.root)
-        val top = findViewById<View>(R.id.topPanel)
-        val controls = findViewById<View>(R.id.controls)
-        val dock = findViewById<View>(R.id.bottomDock)
-        val lpTop = top.layoutParams as FrameLayout.LayoutParams
-        val lpCtl = controls.layoutParams as FrameLayout.LayoutParams
-        val lpDock = dock.layoutParams as FrameLayout.LayoutParams
-        val baseTop = lpTop.topMargin
-        val baseCtl = lpCtl.bottomMargin
-        val baseDock = lpDock.bottomMargin
+        val tops = listOf(R.id.topPanel, R.id.navBanner).map { findViewById<View>(it) }
+        val bottoms = listOf(R.id.bottomDock, R.id.navBar).map { findViewById<View>(it) }
+        val baseTops = tops.map { (it.layoutParams as FrameLayout.LayoutParams).topMargin }
+        val baseBottoms = bottoms.map { (it.layoutParams as FrameLayout.LayoutParams).bottomMargin }
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             insetTop = sb.top
             insetBottom = sb.bottom
-            lpTop.topMargin = baseTop + sb.top
-            lpCtl.bottomMargin = baseCtl + sb.bottom
-            lpDock.bottomMargin = baseDock + sb.bottom
-            top.layoutParams = lpTop
-            controls.layoutParams = lpCtl
-            dock.layoutParams = lpDock
+            tops.forEachIndexed { i, v -> (v.layoutParams as FrameLayout.LayoutParams).topMargin = baseTops[i] + sb.top; v.requestLayout() }
+            bottoms.forEachIndexed { i, v -> (v.layoutParams as FrameLayout.LayoutParams).bottomMargin = baseBottoms[i] + sb.bottom; v.requestLayout() }
+            updateControlsMargin()
             applyMapUiMargins()
             insets
         }
+        findViewById<View>(R.id.navBar).addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateControlsMargin() }
         ViewCompat.requestApplyInsets(root)
+    }
+
+    /** The control capsule sits 16 dp above whatever panel is at the bottom (dock or navigator bar). */
+    private fun updateControlsMargin() {
+        val c = findViewById<View>(R.id.controls)
+        val nb = findViewById<View>(R.id.navBar)
+        val lp = c.layoutParams as FrameLayout.LayoutParams
+        val panel = if (nb.visibility == View.VISIBLE) maxOf(nb.height, dp(64f)) else dp(64f)
+        val want = insetBottom + dp(16f) + panel + dp(16f)
+        if (lp.bottomMargin != want) { lp.bottomMargin = want; c.layoutParams = lp }
     }
 
     /** Keeps the MapLibre logo, attribution and compass out from under the floating panels. */
@@ -362,7 +407,13 @@ class MainActivity : AppCompatActivity() {
         m.addOnCameraMoveStartedListener { reason ->
             if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) following = false
         }
-        m.addOnMapLongClickListener { ll -> addWaypointDialog(ll); true }
+        m.addOnMapLongClickListener { ll ->
+            MaterialAlertDialogBuilder(this).setTitle(Geo.fmtCoord(ll.latitude, ll.longitude))
+                .setItems(arrayOf("Маршрут сюда", "Сохранить точку")) { _, i ->
+                    if (i == 0) setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude)) else addWaypointDialog(ll)
+                }.show()
+            true
+        }
         m.addOnMapClickListener { ll ->
             if (rulerOn) { rulerPts.add(ll); refreshRuler(); true } else false
         }
@@ -464,6 +515,18 @@ class MainActivity : AppCompatActivity() {
             PropertyFactory.lineColor("#1565c0"), PropertyFactory.lineWidth(4f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
 
+        s.addSource(GeoJsonSource("ovl-route"))
+        s.addLayer(LineLayer("ovl-route-case", "ovl-route").withProperties(
+            PropertyFactory.lineColor("#ffffff"), PropertyFactory.lineWidth(10f), PropertyFactory.lineOpacity(0.9f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        s.addLayer(LineLayer("ovl-route-l", "ovl-route").withProperties(
+            PropertyFactory.lineColor(themeHex(R.attr.gmAccent)), PropertyFactory.lineWidth(6.5f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        s.addSource(GeoJsonSource("ovl-dest"))
+        s.addLayer(CircleLayer("ovl-dest-c", "ovl-dest").withProperties(
+            PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(themeHex(R.attr.gmCrosshair)),
+            PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
+
         s.addSource(GeoJsonSource("ovl-ruler"))
         s.addLayer(LineLayer("ovl-ruler-l", "ovl-ruler").withProperties(
             PropertyFactory.lineColor("#e65100"), PropertyFactory.lineWidth(3f),
@@ -492,6 +555,14 @@ class MainActivity : AppCompatActivity() {
             PropertyFactory.circleRadius(8f), PropertyFactory.circleColor("#2979ff"),
             PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
     }
+
+    private fun themeColorInt(attr: Int): Int {
+        val tv = TypedValue()
+        theme.resolveAttribute(attr, tv, true)
+        return tv.data
+    }
+
+    private fun themeHex(attr: Int): String = String.format(Locale.US, "#%06X", themeColorInt(attr) and 0xFFFFFF)
 
     private fun src(id: String): GeoJsonSource? = style?.getSourceAs<GeoJsonSource>(id)
 
@@ -595,6 +666,7 @@ class MainActivity : AppCompatActivity() {
             else -> 15.5
         }
         map?.easeCamera(CameraUpdateFactory.newLatLngZoom(ll, z), 900)
+        setDestination(ll, listOf(p.ru, p.en, p.ka).firstOrNull { it.isNotEmpty() } ?: Geo.fmtCoord(p.lat, p.lon))
         lvResults.visibility = View.GONE
         etSearch.clearFocus()
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(etSearch.windowToken, 0)
@@ -621,7 +693,8 @@ class MainActivity : AppCompatActivity() {
             val first = myLoc == null
             myLoc = l
             refreshMe()
-            if ((first || following) && map != null) {
+            if (navMode == NavMode.ACTIVE) onNavLocation(l)
+            else if ((first || following) && map != null) {
                 val z = maxOf(map!!.cameraPosition.zoom, 14.0)
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(l.latitude, l.longitude), z), 600)
                 following = true
@@ -678,49 +751,72 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ menu
 
     private fun showMenu() {
-        val langs = enabledLanguages().joinToString("/") { it.name }.ifEmpty { "выкл" }
-        val rec = TrackService.running
+        val langs = enabledLanguages().joinToString(" · ") { it.name }.ifEmpty { "выкл" }
         val hasRelief = File(filesDir, "relief.mbtiles").exists()
-        val items = arrayOf(
-            "Языки названий ($langs)",
-            "Категории POI",
-            "Рельеф: " + if (!hasRelief) "нет данных" else if (prefs.getBoolean("relief_on", true)) "вкл" else "выкл",
-            "Режим: " + when (themeMode()) { "light" -> "светлый"; "dark" -> "тёмный"; else -> "как в системе" },
-            "Цветовая тема: ${palette().title}",
-            "Мои точки",
-            if (rec) "■ Остановить запись трека" else "● Начать запись трека",
-            "Мои треки",
-            "Линейка: " + if (rulerOn) "выключить" else "включить",
-            "Перейти к координатам",
-            "Экспорт GPX (точки и треки)",
-            "Импорт GPX",
-            "Справка",
-            "Диагностика",
-            "Простые подписи (отладка): " + if (prefs.getBoolean("labels_simple", false)) "вкл" else "выкл"
-        )
-        MaterialAlertDialogBuilder(this).setItems(items) { _, which ->
-            when (which) {
-                0 -> showLanguageDialog()
-                1 -> showPoiDialog()
-                2 -> { prefs.edit().putBoolean("relief_on", !prefs.getBoolean("relief_on", true)).apply(); style?.let { applyRelief(it) } }
-                3 -> {
-                    val next = when (themeMode()) { "auto" -> "light"; "light" -> "dark"; else -> "auto" }
-                    prefs.edit().putString("theme_mode", next).apply()
-                    applyThemeMode(next)   // recreates the activity: UI and map style both switch
+        val rec = TrackService.running
+        val poiN = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).size
+        val modeName = when (themeMode()) { "light" -> "Светлый"; "dark" -> "Тёмный"; else -> "Как в системе" }
+        MenuUi.show(
+            this, "Меню",
+            listOf(
+                MenuTile(R.drawable.ic_navigation, "Навигатор", navMode != NavMode.IDLE) { openNavigatorChooser() },
+                MenuTile(R.drawable.ic_bookmark, "Точки", false) { showWaypoints() },
+                MenuTile(if (rec) R.drawable.ic_stop else R.drawable.ic_record, if (rec) "Стоп" else "Запись", rec) { toggleRecording() },
+                MenuTile(R.drawable.ic_straighten, "Линейка", rulerOn) {
+                    rulerOn = !rulerOn
+                    if (!rulerOn) rulerPts.clear()
+                    refreshRuler()
                 }
-                4 -> showPaletteDialog()
-                5 -> showWaypoints()
-                6 -> toggleRecording()
-                7 -> showTracks()
-                8 -> { rulerOn = !rulerOn; if (!rulerOn) rulerPts.clear(); refreshRuler() }
-                9 -> gotoCoordinatesDialog()
-                10 -> exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
-                11 -> importLauncher.launch(arrayOf("*/*"))
-                12 -> showInfo()
-                13 -> showDiagnostics()
-                14 -> { prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply(); style?.let { applyLabels(it) } }
+            ),
+            listOf(
+                MenuSection("Карта", listOf(
+                    MenuRow.Link("Языки названий", langs) { showLanguageDialog() },
+                    MenuRow.Link("Категории на карте", if (poiN == 0) "все" else "выбрано $poiN") { showPoiDialog() },
+                    MenuRow.Toggle("Рельеф", if (hasRelief) "Тени гор на карте" else "Нет данных в APK",
+                        prefs.getBoolean("relief_on", true) && hasRelief, hasRelief) { on ->
+                        prefs.edit().putBoolean("relief_on", on).apply()
+                        style?.let { applyRelief(it) }
+                    }
+                )),
+                MenuSection("Оформление", listOf(
+                    MenuRow.Link("Режим", modeName) { showModeDialog() },
+                    MenuRow.Link("Цветовая тема", palette().title) { showPaletteDialog() }
+                )),
+                MenuSection("Навигация", listOf(
+                    MenuRow.Toggle("Голосовые подсказки", "Нужен русский голос в системе",
+                        prefs.getBoolean("nav_voice", true)) { on -> prefs.edit().putBoolean("nav_voice", on).apply() },
+                    MenuRow.Link("Транспорт по умолчанию", profileName(navProfile)) { showNavProfileDialog() }
+                )),
+                MenuSection("Мои данные", listOf(
+                    MenuRow.Link("Мои треки") { showTracks() },
+                    MenuRow.Link("Перейти к координатам") { gotoCoordinatesDialog() },
+                    MenuRow.Link("Экспорт GPX") {
+                        exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
+                    },
+                    MenuRow.Link("Импорт GPX") { importLauncher.launch(arrayOf("*/*")) }
+                )),
+                MenuSection("О приложении", listOf(
+                    MenuRow.Link("Справка") { showInfo() },
+                    MenuRow.Link("Диагностика") { showDiagnostics() },
+                    MenuRow.Toggle("Простые подписи", "Для отладки карты", prefs.getBoolean("labels_simple", false)) { on ->
+                        prefs.edit().putBoolean("labels_simple", on).apply()
+                        style?.let { applyLabels(it) }
+                    }
+                ))
+            )
+        )
+    }
+
+    private fun showModeDialog() {
+        val keys = listOf("auto", "light", "dark")
+        val names = arrayOf("Как в системе", "Светлый", "Тёмный")
+        MaterialAlertDialogBuilder(this).setTitle("Режим оформления")
+            .setSingleChoiceItems(names, keys.indexOf(themeMode())) { d, which ->
+                d.dismiss()
+                prefs.edit().putString("theme_mode", keys[which]).apply()
+                applyThemeMode(keys[which])   // recreates the activity: UI and map style both switch
             }
-        }.show()
+            .setNegativeButton(android.R.string.cancel, null).show()
     }
 
     private fun showLanguageDialog() {
@@ -772,9 +868,12 @@ class MainActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this).setTitle("Мои точки").setItems(items) { _, i ->
             val w = list[i]
             MaterialAlertDialogBuilder(this).setTitle(w.name)
-                .setItems(arrayOf("Перейти", "Удалить")) { _, a ->
-                    if (a == 0) flyTo(w.lat, w.lon, 15.0)
-                    else { userDb.deleteWaypoint(w.id); refreshWaypoints() }
+                .setItems(arrayOf("Перейти", "Маршрут сюда", "Удалить")) { _, a ->
+                    when (a) {
+                        0 -> flyTo(w.lat, w.lon, 15.0)
+                        1 -> setDestination(LatLng(w.lat, w.lon), w.name)
+                        else -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
+                    }
                 }.show()
         }.show()
     }
@@ -1042,10 +1141,302 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ============================================================ navigator (offline road routing)
+
+    private fun profileName(p: Int) = when (p) { Profile.FOOT -> "Пешком"; Profile.BIKE -> "На велосипеде"; else -> "На авто" }
+
+    private fun showNavProfileDialog() {
+        val ps = listOf(Profile.CAR, Profile.FOOT, Profile.BIKE)
+        MaterialAlertDialogBuilder(this).setTitle("Транспорт по умолчанию")
+            .setSingleChoiceItems(ps.map { profileName(it) }.toTypedArray(), ps.indexOf(navProfile)) { d, which ->
+                navProfile = ps[which]
+                prefs.edit().putInt("nav_profile", navProfile).apply()
+                d.dismiss()
+            }.setNegativeButton(android.R.string.cancel, null).show()
+    }
+
+    private fun openNavigatorChooser() {
+        if (navMode == NavMode.ACTIVE) {
+            MaterialAlertDialogBuilder(this).setMessage("Завершить текущую навигацию?")
+                .setPositiveButton("Завершить") { _, _ -> stopNav() }
+                .setNegativeButton("Нет", null).show()
+            return
+        }
+        val items = arrayOf("К центру карты", "В одну из моих точек", "По координатам", "Найти место через поиск")
+        MaterialAlertDialogBuilder(this).setTitle("Навигатор: куда едем?").setItems(items) { _, i ->
+            when (i) {
+                0 -> map?.cameraPosition?.target?.let { setDestination(it, Geo.fmtCoord(it.latitude, it.longitude)) }
+                1 -> {
+                    val list = userDb.waypoints()
+                    if (list.isEmpty()) toast("Сохранённых точек нет")
+                    else MaterialAlertDialogBuilder(this).setTitle("Куда").setItems(list.map { it.name }.toTypedArray()) { _, k ->
+                        setDestination(LatLng(list[k].lat, list[k].lon), list[k].name)
+                    }.show()
+                }
+                2 -> {
+                    val et = EditText(this)
+                    et.hint = "41.7151, 44.8271"
+                    MaterialAlertDialogBuilder(this).setTitle("Широта, долгота").setView(et)
+                        .setPositiveButton("Маршрут") { _, _ ->
+                            val ll = Geo.parseCoord(et.text.toString())
+                            if (ll == null) toast("Не удалось разобрать координаты")
+                            else setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude))
+                        }.setNegativeButton("Отмена", null).show()
+                }
+                else -> {
+                    etSearch.requestFocus()
+                    (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(etSearch, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+        }.show()
+    }
+
+    private fun setDestination(ll: LatLng, name: String) {
+        if (navMode == NavMode.ACTIVE) return
+        navDest = ll
+        navDestName = name
+        session = null
+        src("ovl-route")?.setGeoJson(Geo.lineFc(emptyList()))
+        src("ovl-dest")?.setGeoJson(Geo.pointFc(listOf(ll)))
+        navMode = NavMode.PLACE
+        updateNavUi()
+    }
+
+    private fun chooseProfile(p: Int) {
+        navProfile = p
+        prefs.edit().putInt("nav_profile", p).apply()
+        if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
+    }
+
+    private fun fmtDur(sec: Double): String {
+        val m = (sec / 60).roundToInt().coerceAtLeast(1)
+        return if (m < 60) "$m мин" else "${m / 60} ч ${m % 60} мин"
+    }
+
+    private fun fmtEta(sec: Double): String =
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis() + (sec * 1000).toLong()))
+
+    private fun fmtStepDist(m: Double): String = when {
+        m < 25 -> "Сейчас"
+        m < 200 -> "${(m / 10).roundToInt() * 10} м"
+        m < 1000 -> "${(m / 50).roundToInt() * 50} м"
+        else -> String.format(Locale.US, "%.1f км", m / 1000.0)
+    }
+
+    private fun setSummary(remM: Double, remS: Double) {
+        findViewById<TextView>(R.id.navMain).text = Geo.fmtDist(remM) + " · " + fmtDur(remS)
+        findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
+            if (navDestName.isNotBlank()) "\n" + navDestName else ""
+    }
+
+    /** One bottom bar serves three states: a chosen place, a route preview, active guidance. */
+    private fun updateNavUi() {
+        val mode = navMode
+        val active = mode == NavMode.ACTIVE
+        findViewById<View>(R.id.navBanner).visibility = if (active) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.topPanel).visibility = if (active) View.GONE else View.VISIBLE
+        val bar = findViewById<View>(R.id.navBar)
+        bar.visibility = if (mode == NavMode.IDLE) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.bottomDock).visibility = if (mode == NavMode.IDLE) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.navProfiles).visibility = if (mode == NavMode.PREVIEW) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btnNavClose).visibility = if (active) View.GONE else View.VISIBLE
+        val go = findViewById<TextView>(R.id.btnNavGo)
+        go.setBackgroundResource(if (active) R.drawable.bg_btn_danger else R.drawable.bg_btn_primary)
+        go.text = when (mode) { NavMode.PLACE -> "Маршрут"; NavMode.PREVIEW -> "Начать"; NavMode.ACTIVE -> "Завершить"; else -> "" }
+        listOf(R.id.navProfCar to Profile.CAR, R.id.navProfFoot to Profile.FOOT, R.id.navProfBike to Profile.BIKE).forEach { (id, p) ->
+            val v = findViewById<TextView>(id)
+            val sel = p == navProfile
+            v.setBackgroundResource(if (sel) R.drawable.bg_chip_selected else R.drawable.bg_chip)
+            v.setTextColor(themeColorInt(if (sel) R.attr.gmOnAccentContainer else R.attr.gmTextSecondary))
+        }
+        when (mode) {
+            NavMode.PLACE -> {
+                findViewById<TextView>(R.id.navMain).text = navDestName
+                findViewById<TextView>(R.id.navSub).text = navDest?.let { Geo.fmtCoord(it.latitude, it.longitude) } ?: ""
+            }
+            NavMode.PREVIEW -> session?.let { setSummary(it.totalM, it.route.timeS) }
+            else -> {}
+        }
+        bar.post { updateControlsMargin() }
+    }
+
+    private fun planRoute() {
+        val dest = navDest ?: return
+        val from = myLoc?.let { LatLng(it.latitude, it.longitude) } ?: routeFrom
+        if (from == null) {
+            MaterialAlertDialogBuilder(this)
+                .setMessage("Нет сигнала GPS. Построить маршрут от центра карты или включить GPS?")
+                .setPositiveButton("Включить GPS") { _, _ -> withLocationPermission { startLocation(true) } }
+                .setNeutralButton("От центра карты") { _, _ ->
+                    routeFrom = map?.cameraPosition?.target
+                    planRoute()
+                }
+                .setNegativeButton("Отмена", null).show()
+            return
+        }
+        computeRoute(from, dest, false) { r, err ->
+            if (r == null) {
+                toast(err ?: "Маршрут не найден")
+                updateNavUi()
+                return@computeRoute
+            }
+            session = NavSession(r, navProfile)
+            drawRoute(r)
+            fitRoute(r)
+            navMode = NavMode.PREVIEW
+            updateNavUi()
+        }
+    }
+
+    /** Runs the search on a worker thread (the road graph is loaded from routing.bin on first use). */
+    private fun computeRoute(from: LatLng, to: LatLng, silent: Boolean, done: (RouteResult?, String?) -> Unit) {
+        val f = File(filesDir, "routing.bin")
+        if (!f.exists()) {
+            done(null, "В приложении нет дорожных данных (routing.bin). Пересоберите APK.")
+            return
+        }
+        val profile = navProfile
+        if (!silent) findViewById<TextView>(R.id.navSub).text = if (graph == null) "Загружаю дорожные данные…" else "Строю маршрут…"
+        thread(name = "routing") {
+            try {
+                val g = graph ?: RandomAccessFile(f, "r").use { raf ->
+                    RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
+                }.also { graph = it }
+                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile)
+                runOnUiThread { done(r, if (r == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null) }
+            } catch (e: Throwable) {
+                runOnUiThread { done(null, "Ошибка маршрутизации: ${e.message}") }
+            }
+        }
+    }
+
+    private fun drawRoute(r: RouteResult) {
+        src("ovl-route")?.setGeoJson(Geo.lineFc((0 until r.pointCount).map { LatLng(r.lat(it), r.lon(it)) }))
+    }
+
+    private fun fitRoute(r: RouteResult) {
+        val pts = ArrayList<LatLng>()
+        val step = maxOf(1, r.pointCount / 200)
+        var i = 0
+        while (i < r.pointCount) { pts.add(LatLng(r.lat(i), r.lon(i))); i += step }
+        pts.add(LatLng(r.lat(r.pointCount - 1), r.lon(r.pointCount - 1)))
+        if (pts.size < 2) return
+        try {
+            val b = LatLngBounds.Builder().includes(pts).build()
+            following = false
+            map?.easeCamera(
+                CameraUpdateFactory.newLatLngBounds(b, dp(48f), dp(96f) + insetTop, dp(48f), dp(260f) + insetBottom), 900
+            )
+        } catch (e: Exception) { /* degenerate route: keep the camera */ }
+    }
+
+    private fun initTts() {
+        if (tts != null) return
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val r = tts?.setLanguage(Locale("ru", "RU"))
+                ttsReady = r != null && r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
+            }
+        }
+    }
+
+    private fun speak(text: String) {
+        if (!ttsReady || !prefs.getBoolean("nav_voice", true)) return
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav")
+    }
+
+    private fun startNav() {
+        if (session == null) return
+        navMode = NavMode.ACTIVE
+        offCount = 0
+        announced.clear()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (prefs.getBoolean("nav_voice", true)) initTts()
+        following = true
+        withLocationPermission { startLocation(false) }
+        updateNavUi()
+        session?.let { s ->
+            val st = s.route.steps.getOrNull(1) ?: s.route.steps.first()
+            findViewById<TextView>(R.id.navArrow).text = Maneuver.arrow(st.kind)
+            findViewById<TextView>(R.id.navDist).text = fmtStepDist(s.route.steps.first().distToNextM)
+            findViewById<TextView>(R.id.navText).text = s.route.steps.first().text
+            setSummary(s.totalM, s.route.timeS)
+        }
+        val l = myLoc
+        if (l != null) onNavLocation(l) else toast("Ждём сигнал GPS…")
+    }
+
+    private fun stopNav() {
+        navMode = NavMode.IDLE
+        session = null
+        navDest = null
+        routeFrom = null
+        rerouting = false
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        tts?.stop()
+        src("ovl-route")?.setGeoJson(Geo.lineFc(emptyList()))
+        src("ovl-dest")?.setGeoJson(Geo.pointFc(emptyList()))
+        map?.let { m ->
+            m.easeCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).tilt(0.0).bearing(0.0).build()), 500)
+        }
+        updateNavUi()
+    }
+
+    private fun onNavLocation(l: Location) {
+        val s = session ?: return
+        val prog = s.update(l.latitude, l.longitude)
+        val m = map
+        if (following && m != null) {
+            val bearing = if (l.hasBearing() && l.speed > 1.5f) l.bearing.toDouble() else m.cameraPosition.bearing
+            val zoom = if (s.profile == Profile.CAR) 16.5 else 17.5
+            m.easeCamera(CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder().target(LatLng(l.latitude, l.longitude)).zoom(zoom).bearing(bearing).tilt(40.0).build()), 900)
+        }
+        if (prog.arrived) {
+            speak("Вы прибыли в пункт назначения")
+            toast("Вы прибыли в пункт назначения")
+            stopNav()
+            return
+        }
+        val step = s.route.steps[prog.stepIndex]
+        findViewById<TextView>(R.id.navArrow).text = Maneuver.arrow(step.kind)
+        findViewById<TextView>(R.id.navDist).text = fmtStepDist(prog.distToStepM)
+        findViewById<TextView>(R.id.navText).text = step.text
+        setSummary(prog.remainingM, prog.remainingS)
+
+        val far = if (s.profile == Profile.CAR) 400.0 else 80.0
+        val near = if (s.profile == Profile.CAR) 70.0 else 25.0
+        if (step.kind != Maneuver.ARRIVE) {
+            if (prog.distToStepM <= far && announced.add("${prog.stepIndex}:far") && prog.distToStepM > near + 20) {
+                val d = ((prog.distToStepM / 50).roundToInt() * 50).coerceAtLeast(50)
+                speak("Через $d метров, ${step.text}")
+            } else if (prog.distToStepM <= near && announced.add("${prog.stepIndex}:near")) {
+                speak(step.text)
+            }
+        }
+
+        if (prog.offRouteM > s.offRouteLimitM) offCount++ else offCount = 0
+        if (offCount >= 3 && !rerouting && System.currentTimeMillis() - lastReroute > 8000) {
+            val dest = navDest ?: return
+            rerouting = true
+            lastReroute = System.currentTimeMillis()
+            offCount = 0
+            speak("Пересчёт маршрута")
+            computeRoute(LatLng(l.latitude, l.longitude), dest, true) { r, _ ->
+                rerouting = false
+                if (r != null && navMode == NavMode.ACTIVE) {
+                    session = NavSession(r, navProfile)
+                    announced.clear()
+                    drawRoute(r)
+                }
+            }
+        }
+    }
+
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private val DATA_FILES = listOf("georgia.mbtiles", "relief.mbtiles", "places.db")
+        private val DATA_FILES = listOf("georgia.mbtiles", "relief.mbtiles", "places.db", "routing.bin")
         private val GEORGIA = LatLngBounds.from(43.65, 46.8, 41.0, 40.0)
 
         private val POI_CATS: Map<String, List<String>> = linkedMapOf(

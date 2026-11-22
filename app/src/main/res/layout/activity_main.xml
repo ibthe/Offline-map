@@ -192,6 +192,170 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- NAVIGATION: next manoeuvre (top) -->
+    <LinearLayout
+        android:id="@+id/navBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginTop="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:background="@drawable/bg_panel_list"
+        android:elevation="@dimen/elev_3"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="@dimen/space_4"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/navArrow"
+            android:layout_width="56dp"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:textColor="?attr/gmAccent"
+            android:textSize="40sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_3"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/navDist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Georgia.Headline"
+                android:textColor="?attr/gmTextPrimary" />
+
+            <TextView
+                android:id="@+id/navText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_1"
+                android:maxLines="2"
+                android:textAppearance="@style/TextAppearance.Georgia.Body"
+                android:textColor="?attr/gmTextSecondary" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- NAVIGATION: place / route summary (bottom, takes the dock's place) -->
+    <LinearLayout
+        android:id="@+id/navBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:layout_marginBottom="@dimen/screen_margin"
+        android:background="@drawable/bg_panel_list"
+        android:elevation="@dimen/elev_3"
+        android:orientation="vertical"
+        android:padding="@dimen/space_3"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/navProfiles"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginBottom="@dimen/space_3"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/navProfCar"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:text="Авто"
+                android:textAppearance="@style/TextAppearance.Georgia.Label" />
+
+            <TextView
+                android:id="@+id/navProfFoot"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="@dimen/space_2"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:text="Пешком"
+                android:textAppearance="@style/TextAppearance.Georgia.Label" />
+
+            <TextView
+                android:id="@+id/navProfBike"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="@dimen/space_2"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:text="Вело"
+                android:textAppearance="@style/TextAppearance.Georgia.Label" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_2"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/navMain"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textAppearance="@style/TextAppearance.Georgia.Title"
+                    android:textColor="?attr/gmTextPrimary" />
+
+                <TextView
+                    android:id="@+id/navSub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_1"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textAppearance="@style/TextAppearance.Georgia.Label"
+                    android:textColor="?attr/gmTextSecondary" />
+            </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/btnNavClose"
+                android:layout_width="@dimen/control"
+                android:layout_height="@dimen/control"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="@string/clear"
+                android:src="@drawable/ic_clear" />
+
+            <TextView
+                android:id="@+id/btnNavGo"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/control"
+                android:layout_marginStart="@dimen/space_1"
+                android:background="@drawable/bg_btn_primary"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:minWidth="120dp"
+                android:paddingStart="@dimen/space_5"
+                android:paddingEnd="@dimen/space_5"
+                android:textAppearance="@style/TextAppearance.Georgia.Title"
+                android:textColor="?attr/gmOnAccent" />
+        </LinearLayout>
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/loading"
         android:layout_width="match_parent"

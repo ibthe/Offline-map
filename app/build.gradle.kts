@@ -30,7 +30,7 @@ android {
 
     // keep the big tile database uncompressed inside the APK (fast copy on first launch)
     androidResources {
-        noCompress += listOf("mbtiles", "db")
+        noCompress += listOf("mbtiles", "db", "bin")
     }
 }
 

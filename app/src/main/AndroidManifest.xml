@@ -14,8 +14,16 @@
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
+    <!-- voice guidance uses the phone's text-to-speech engine (package visibility on Android 11+) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
+        android:largeHeap="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.GeorgiaMap">
