@@ -3,14 +3,14 @@
     <!-- Ocean palette: defaults before a theme overlay is applied -->
     <color name="surface">#F4F7F9</color>
     <color name="panel">#F2FFFFFF</color>
-    <color name="panel_stroke">#1A14323F</color>
+    <color name="panel_stroke">#4714323F</color>
     <color name="fab_bg">#FAFFFFFF</color>
     <color name="dialog_bg">#FFFFFF</color>
     <color name="text_primary">#14212B</color>
     <color name="text_secondary">#54656F</color>
     <color name="hint">#8798A3</color>
     <color name="icon_tint">#1E3340</color>
-    <color name="divider_soft">#12143240</color>
+    <color name="divider_soft">#2E143240</color>
     <color name="accent">#2A7FA8</color>
     <color name="accent_end">#3FA6A0</color>
     <color name="on_accent">#FFFFFF</color>

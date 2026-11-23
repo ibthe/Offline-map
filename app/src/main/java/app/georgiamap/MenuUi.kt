@@ -61,30 +61,37 @@ object MenuUi {
             setPadding(dp(8), dp(4), dp(8), dp(16))
         })
 
-        // ---- quick tiles: equal width, 8 dp gaps
-        val tileRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        tiles.forEachIndexed { i, t ->
-            val tile = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(dp(4), dp(12), dp(4), dp(12))
-                setBackgroundResource(if (t.active) R.drawable.bg_tile_active else R.drawable.bg_tile)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { dialog.dismiss(); t.onClick() }
+        // ---- quick tiles: 3 per row, equal width, 8 dp gaps
+        val tileGrid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        tiles.chunked(3).forEachIndexed { rowIdx, chunk ->
+            val tileRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            for (i in 0 until 3) {
+                val t = chunk.getOrNull(i)
+                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) }
+                if (t == null) { tileRow.addView(View(ctx), lp); continue }
+                val tile = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(dp(4), dp(12), dp(4), dp(12))
+                    setBackgroundResource(if (t.active) R.drawable.bg_tile_active else R.drawable.bg_tile)
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { dialog.dismiss(); t.onClick() }
+                }
+                tile.addView(ImageView(ctx).apply {
+                    setImageResource(t.icon)
+                    setColorFilter(if (t.active) onContainer else accent)
+                }, LinearLayout.LayoutParams(dp(24), dp(24)))
+                tile.addView(text(R.style.TextAppearance_Georgia_Label, if (t.active) onContainer else primary, t.label).apply {
+                    gravity = Gravity.CENTER; maxLines = 1
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+                tileRow.addView(tile, lp)
             }
-            tile.addView(ImageView(ctx).apply {
-                setImageResource(t.icon)
-                setColorFilter(if (t.active) onContainer else accent)
-            }, LinearLayout.LayoutParams(dp(24), dp(24)))
-            tile.addView(text(R.style.TextAppearance_Georgia_Label, if (t.active) onContainer else primary, t.label).apply {
-                gravity = Gravity.CENTER; maxLines = 1
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
-            tileRow.addView(tile, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (i > 0) marginStart = dp(8)
+            tileGrid.addView(tileRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                if (rowIdx > 0) topMargin = dp(8)
             })
         }
-        col.addView(tileRow)
+        col.addView(tileGrid)
 
         // ---- grouped cards
         for (sec in sections) {

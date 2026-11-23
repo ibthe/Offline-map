@@ -115,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
+    private lateinit var compass: CompassController
     private var myLoc: Location? = null
     private var following = false
     private var locActive = false
@@ -164,12 +165,14 @@ class MainActivity : AppCompatActivity() {
         }.toTypedArray<CharSequence>()
         MaterialAlertDialogBuilder(this)
             .setTitle("Цветовая тема")
-            .setSingleChoiceItems(items, all.indexOf(palette())) { d, which ->
-                prefs.edit().putString("palette", all[which].key).apply()
-                d.dismiss()
-                recreate()   // UI overlay and map style are both rebuilt with the new palette
+            .setSingleChoiceItems(items, all.indexOf(palette())) { _, which ->
+                if (all[which] != palette()) {
+                    // the UI overlay and the map style are rebuilt with the new palette; the chooser reopens afterwards
+                    prefs.edit().putString("palette", all[which].key).putString("reopen", "palette").apply()
+                    recreate()
+                }
             }
-            .setNegativeButton(android.R.string.cancel, null).show()
+            .setPositiveButton("Готово", null).show()
     }
 
     /** "auto" follows the system, "light" / "dark" force the app UI and the map style. */
@@ -232,6 +235,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         navProfile = prefs.getInt("nav_profile", Profile.CAR)
+        compass = CompassController(this, object : CompassController.Host {
+            override fun origin(): CompassController.Origin? {
+                myLoc?.let { return CompassController.Origin(it.latitude, it.longitude, if (it.hasAltitude()) it.altitude else 0.0, "GPS") }
+                val c = map?.cameraPosition?.target ?: return null
+                return CompassController.Origin(c.latitude, c.longitude, 0.0, "центр карты (GPS нет)")
+            }
+            override fun mapCenter() = map?.cameraPosition?.target?.let { CompassController.Target("Центр карты", it.latitude, it.longitude) }
+            override fun searchPlaces(q: String): List<CompassController.Target> = placeDb?.search(q, 20)?.map { p ->
+                CompassController.Target(listOf(p.ru, p.en, p.ka).firstOrNull { it.isNotEmpty() } ?: q, p.lat, p.lon)
+            } ?: emptyList()
+            override fun waypoints() = userDb.waypoints().map { CompassController.Target(it.name, it.lat, it.lon) }
+            override fun navTarget() = navDest?.let { CompassController.Target(navDestName.ifBlank { "Цель" }, it.latitude, it.longitude) }
+            override fun setMapBearing(deg: Double) {
+                if (navMode == NavMode.ACTIVE) return
+                map?.let { m -> m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).bearing(deg).build())) }
+            }
+            override fun toast(msg: String) = this@MainActivity.toast(msg)
+        })
         findViewById<View>(R.id.btnNavClose).setOnClickListener { stopNav() }
         findViewById<View>(R.id.btnNavGo).setOnClickListener {
             when (navMode) {
@@ -278,10 +299,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onStart() { super.onStart(); mapView.onStart(); if (locActive) startLocation(false) }
+    private fun reopenPending() {
+        val what = prefs.getString("reopen", "") ?: ""
+        if (what.isEmpty()) return
+        prefs.edit().remove("reopen").apply()
+        ui.post { if (what == "palette") showPaletteDialog() else if (what == "mode") showModeDialog() }
+    }
+
+    override fun onStart() { super.onStart(); reopenPending(); mapView.onStart(); compass.onStart(); if (locActive) startLocation(false) }
     override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick() }
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
-    override fun onStop() { stopLocationUpdates(); mapView.onStop(); super.onStop() }
+    override fun onStop() { stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
     override fun onDestroy() { tts?.shutdown(); mapView.onDestroy(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) {
@@ -331,9 +359,8 @@ class MainActivity : AppCompatActivity() {
     /** Keeps the MapLibre logo, attribution and compass out from under the floating panels. */
     private fun applyMapUiMargins() {
         val ui = map?.uiSettings ?: return
-        val bottom = dp(96f) + insetBottom           // dock margin 16 + dock 64 + gap 16
-        ui.setLogoMargins(dp(16f), 0, 0, bottom)
-        ui.setAttributionMargins(dp(16f + 88f), 0, 0, bottom)
+        val bottom = dp(96f) + insetBottom           // dock margin 16 + dock 64 + gap 16 (the MapLibre logo is switched off)
+        ui.setAttributionMargins(dp(16f), 0, 0, bottom)
         ui.setCompassMargins(0, dp(16f + 56f + 8f + 48f + 8f) + insetTop, dp(16f), 0)   // under search + info chip
     }
 
@@ -395,6 +422,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap(m: MapLibreMap) {
         map = m
+        m.uiSettings.isLogoEnabled = false
         applyMapUiMargins()
         m.setMinZoomPreference(4.0)
         m.setMaxZoomPreference(18.0)
@@ -760,6 +788,8 @@ class MainActivity : AppCompatActivity() {
             this, "Меню",
             listOf(
                 MenuTile(R.drawable.ic_navigation, "Навигатор", navMode != NavMode.IDLE) { openNavigatorChooser() },
+                MenuTile(R.drawable.ic_compass, "Компас", false) { compass.show(CompassController.Mode.NORTH) },
+                MenuTile(R.drawable.ic_qibla, "Кибла", false) { compass.show(CompassController.Mode.QIBLA) },
                 MenuTile(R.drawable.ic_bookmark, "Точки", false) { showWaypoints() },
                 MenuTile(if (rec) R.drawable.ic_stop else R.drawable.ic_record, if (rec) "Стоп" else "Запись", rec) { toggleRecording() },
                 MenuTile(R.drawable.ic_straighten, "Линейка", rulerOn) {
@@ -811,12 +841,13 @@ class MainActivity : AppCompatActivity() {
         val keys = listOf("auto", "light", "dark")
         val names = arrayOf("Как в системе", "Светлый", "Тёмный")
         MaterialAlertDialogBuilder(this).setTitle("Режим оформления")
-            .setSingleChoiceItems(names, keys.indexOf(themeMode())) { d, which ->
-                d.dismiss()
-                prefs.edit().putString("theme_mode", keys[which]).apply()
-                applyThemeMode(keys[which])   // recreates the activity: UI and map style both switch
+            .setSingleChoiceItems(names, keys.indexOf(themeMode())) { _, which ->
+                if (keys[which] != themeMode()) {
+                    prefs.edit().putString("theme_mode", keys[which]).putString("reopen", "mode").apply()
+                    applyThemeMode(keys[which])   // recreates the activity: UI and map style both switch
+                }
             }
-            .setNegativeButton(android.R.string.cancel, null).show()
+            .setPositiveButton("Готово", null).show()
     }
 
     private fun showLanguageDialog() {
@@ -902,10 +933,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleRecording() {
         if (TrackService.running) {
+            val savedId = prefs.getLong("rec_track", 0L)
             stopService(Intent(this, TrackService::class.java))
             prefs.edit().putLong("rec_track", 0L).apply()
             ui.postDelayed({ refreshTrack(); updateInfo() }, 400)
-            toast("Запись остановлена")
+            MaterialAlertDialogBuilder(this).setTitle("Трек сохранён")
+                .setMessage("Запись остановлена, маршрут сохранён на телефоне.\n\nНайти его: Меню → «Мои данные» → «Мои треки». " +
+                    "Там трек можно показать на карте или удалить, а «Экспорт GPX» сохранит файл для других программ.")
+                .setPositiveButton("Показать на карте") { _, _ ->
+                    if (savedId > 0) { shownTrackId = savedId; refreshTrack(); fitTrack(savedId) }
+                }
+                .setNegativeButton("Закрыть", null).show()
             return
         }
         withLocationPermission {
@@ -1035,7 +1073,10 @@ class MainActivity : AppCompatActivity() {
             "Карта, поиск и рельеф работают без интернета. GPS тоже работает без сети.\n\n" +
             "Горные дороги и перевалы (Омало, Ушгули, Абано и др.) зимой могут быть закрыты — на карте это не отражено. " +
             "Перед выездом уточняйте обстановку на месте.\n\n" +
-            "Для долгой записи трека разрешите приложению работу в фоне и не закрывайте уведомление.\n\n" +
+            "Запись трека (кнопка «Запись» в меню) сохраняет ваш путь по GPS: линию на карте, длину и точки. " +
+            "Остановив запись, найдёте трек в Меню → «Мои данные» → «Мои треки». " +
+            "Для долгой записи разрешите приложению работу в фоне и не закрывайте уведомление.\n\n" +
+            "Компас: направление на север, на Мекку (кибла) или на любой пункт по названию; нужен датчик ориентации, GPS или центр карты задают вашу позицию.\n\n" +
             "Данные: © участники OpenStreetMap (ODbL), схема OpenMapTiles, Natural Earth, рельеф — AWS Terrain Tiles. " +
             "Данные актуальны на дату сборки APK."
         MaterialAlertDialogBuilder(this).setTitle("Справка").setMessage(msg).setPositiveButton("OK", null).show()
@@ -1162,7 +1203,7 @@ class MainActivity : AppCompatActivity() {
                 .setNegativeButton("Нет", null).show()
             return
         }
-        val items = arrayOf("К центру карты", "В одну из моих точек", "По координатам", "Найти место через поиск")
+        val items = arrayOf("Точку на карте", "В одну из моих точек", "По координатам", "Найти место через поиск")
         MaterialAlertDialogBuilder(this).setTitle("Навигатор: куда едем?").setItems(items) { _, i ->
             when (i) {
                 0 -> map?.cameraPosition?.target?.let { setDestination(it, Geo.fmtCoord(it.latitude, it.longitude)) }

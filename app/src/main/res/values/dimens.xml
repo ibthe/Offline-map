@@ -22,6 +22,9 @@
     <dimen name="radius_control">24dp</dimen><!-- 48 / 2 -->
     <dimen name="radius_list">24dp</dimen>
 
+    <!-- border width: thicker in light mode, where borders carry more of the separation -->
+    <dimen name="stroke_w">1.5dp</dimen>
+
     <!-- elevation tiers -->
     <dimen name="elev_1">4dp</dimen>
     <dimen name="elev_2">8dp</dimen>
