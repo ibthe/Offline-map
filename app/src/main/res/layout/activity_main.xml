@@ -137,6 +137,22 @@
             android:contentDescription="@string/btn_location"
             android:src="@drawable/ic_my_location"
             app:tint="?attr/gmAccent" />
+
+        <View
+            android:id="@+id/recDivider"
+            android:layout_width="@dimen/space_5"
+            android:layout_height="1dp"
+            android:layout_gravity="center_horizontal"
+            android:background="?attr/gmDivider" />
+
+        <ImageButton
+            android:id="@+id/btnRec"
+            android:layout_width="@dimen/control"
+            android:layout_height="@dimen/control"
+            android:background="@drawable/bg_icon_btn"
+            android:contentDescription="Запись трека"
+            android:src="@drawable/ic_record"
+            app:tint="?attr/gmCrosshair" />
     </LinearLayout>
 
     <!-- BOTTOM: dock 64 = 8 + 48 + 8. Gap between the two controls = 8 = dock padding (one rhythm). -->
@@ -353,6 +369,42 @@
                 android:paddingEnd="@dimen/space_5"
                 android:textAppearance="@style/TextAppearance.Georgia.Title"
                 android:textColor="?attr/gmOnAccent" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/navPlaceActions"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/control"
+            android:layout_marginTop="@dimen/space_3"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/btnRouteTo"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_btn_primary"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="Маршрут сюда"
+                android:textAppearance="@style/TextAppearance.Georgia.Label"
+                android:textColor="?attr/gmOnAccent" />
+
+            <TextView
+                android:id="@+id/btnRouteFrom"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="@dimen/space_2"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="Маршрут отсюда"
+                android:textAppearance="@style/TextAppearance.Georgia.Label"
+                android:textColor="?attr/gmTextPrimary" />
         </LinearLayout>
     </LinearLayout>
 

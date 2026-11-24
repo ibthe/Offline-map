@@ -49,7 +49,11 @@ class RouteStep(
     val lat: Double, val lon: Double, val pointIndex: Int, var distToNextM: Double
 )
 
-class RouteResult(val points: DoubleArray, val distanceM: Double, val timeS: Double, val steps: List<RouteStep>) {
+class RouteResult(
+    val points: DoubleArray, val distanceM: Double, val timeS: Double, val steps: List<RouteStep>,
+    /** distance from the requested start / end point to the road the route was attached to (0 = on the road) */
+    val startOffM: Double = 0.0, val endOffM: Double = 0.0
+) {
     val pointCount get() = points.size / 2
     fun lat(i: Int) = points[2 * i]
     fun lon(i: Int) = points[2 * i + 1]
@@ -185,31 +189,39 @@ class RoadGraph(buf: ByteBuffer) {
         return s
     }
 
-    private fun snap(lat: Double, lon: Double, p: Int): Snap? {
-        val r0 = ((lat * 1e6).toInt() - gridLat0) / cell
-        val c0 = ((lon * 1e6).toInt() - gridLon0) / cell
-        var best: Snap? = null
+    /**
+     * The [k] nearest usable roads to the point, nearest first. Looks as far as ~45 km: when there is no road close
+     * by, the nearest one is used (the route then starts/ends with a straight "off-road" piece to it).
+     */
+    private fun snapK(lat: Double, lon: Double, p: Int, k: Int): List<Snap> {
+        val r0 = Math.floorDiv((lat * 1e6).toInt() - gridLat0, cell)
+        val c0 = Math.floorDiv((lon * 1e6).toInt() - gridLon0, cell)
+        val found = ArrayList<Snap>()
+        val seen = HashSet<Int>()
         val kx = mLon(lat)
         var ring = 0
-        while (ring <= 8) {
+        var stopAt = Int.MAX_VALUE
+        while (ring <= 45 && ring <= stopAt) {
             for (r in r0 - ring..r0 + ring) {
+                if (r < 0 || r >= rows) continue
                 for (c in c0 - ring..c0 + ring) {
                     if (max(abs(r - r0), abs(c - c0)) != ring) continue
-                    if (r < 0 || c < 0 || r >= rows || c >= cols) continue
-                    val k = r * cols + c
-                    for (i in gridOff[k] until gridOff[k + 1]) {
+                    if (c < 0 || c >= cols) continue
+                    val cellIdx = r * cols + c
+                    for (i in gridOff[cellIdx] until gridOff[cellIdx + 1]) {
                         val e = gridEdge[i]
+                        if (!seen.add(e)) continue
                         if (!canGo(e, 0, p) && !canGo(e, 1, p)) continue
-                        val s = nearestOnEdge(e, lat, lon, kx)
-                        if (best == null || s.dist < best.dist) best = s
+                        found.add(nearestOnEdge(e, lat, lon, kx))
                     }
                 }
             }
-            // a closer road can still sit in the next ring, so look one ring further after the first hit
-            if (best != null && ring >= 1 && best.dist <= (ring) * cell * 1e-6 * M_LAT * 0.9) break
+            // enough candidates: look one more ring (a closer road can sit just across a cell border), then stop
+            if (found.size >= k && stopAt == Int.MAX_VALUE) stopAt = ring + 1
             ring++
         }
-        return best
+        found.sortBy { it.dist }
+        return if (found.size > k) found.subList(0, k).toList() else found
     }
 
     private fun nearestOnEdge(e: Int, lat: Double, lon: Double, kx: Double): Snap {
@@ -288,8 +300,20 @@ class RoadGraph(buf: ByteBuffer) {
 
     @Synchronized
     fun route(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int): RouteResult? {
-        val s = snap(fromLat, fromLon, p) ?: return null
-        val t = snap(toLat, toLon, p) ?: return null
+        val ss = snapK(fromLat, fromLon, p, 4)
+        val ts = snapK(toLat, toLon, p, 4)
+        if (ss.isEmpty() || ts.isEmpty()) return null
+        val pairs = ArrayList<Pair<Snap, Snap>>()
+        for (a in ss) for (b in ts) pairs.add(a to b)
+        pairs.sortBy { it.first.dist + it.second.dist }
+        for ((s, t) in pairs.take(8)) {
+            val r = search(fromLat, fromLon, toLat, toLon, p, s, t)
+            if (r != null) return r
+        }
+        return null
+    }
+
+    private fun search(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap): RouteResult? {
         if (g.size != nN) { g = DoubleArray(nN); prev = IntArray(nN); closed = BooleanArray(nN) }
         java.util.Arrays.fill(g, Double.MAX_VALUE)
         java.util.Arrays.fill(prev, -2)
@@ -426,7 +450,7 @@ class RoadGraph(buf: ByteBuffer) {
         for (l in legs) time += l.lenM / speedMs(l.e, p)
         legs.last().i1 = pts.n - 1
         val real = legs.filter { it.lenM >= 2.0 }
-        return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist))
+        return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist), s.dist, t.dist)
     }
 
     private fun turnKind(turn: Double): Int {

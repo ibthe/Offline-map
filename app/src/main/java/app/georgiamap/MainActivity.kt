@@ -108,6 +108,8 @@ class MainActivity : AppCompatActivity() {
     private var graphLoading = false
     private var session: NavSession? = null
     private var routeFrom: LatLng? = null
+    private var pendingFrom: LatLng? = null       // "route from here": the chosen place is the START
+    private var pendingFromName = ""
     private var offCount = 0
     private var lastReroute = 0L
     private var rerouting = false
@@ -143,12 +145,14 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ lifecycle
 
     /** Five colour themes. Each one has a UI overlay (res/values/palettes.xml) and its own map style file. */
-    private enum class Palette(val key: String, val title: String, val hint: String, val styleRes: Int, val swatch: Int) {
-        OCEAN("ocean", "Океан", "спокойствие и ясность", R.style.ThemeOverlay_Georgia_Ocean, 0xFF2A7FA8.toInt()),
-        FOREST("forest", "Лес", "естественный покой", R.style.ThemeOverlay_Georgia_Forest, 0xFF3F7D58.toInt()),
-        DUSK("dusk", "Закат", "тепло и уют", R.style.ThemeOverlay_Georgia_Dusk, 0xFFB2552F.toInt()),
-        LAVENDER("lavender", "Лаванда", "мягкая расслабленность", R.style.ThemeOverlay_Georgia_Lavender, 0xFF6B5BC4.toInt()),
-        GRAPHITE("graphite", "Графит", "нейтральный фокус", R.style.ThemeOverlay_Georgia_Graphite, 0xFF3D4A5C.toInt())
+    private enum class Palette(val key: String, val title: String, val hint: String, val styleRes: Int, val swatch: Int, val swatch2: Int) {
+        OCEAN("ocean", "Океан", "спокойствие и ясность", R.style.ThemeOverlay_Georgia_Ocean, 0xFF2A7FA8.toInt(), 0xFF3FA6A0.toInt()),
+        FOREST("forest", "Лес", "естественный покой", R.style.ThemeOverlay_Georgia_Forest, 0xFF3F7D58.toInt(), 0xFF7BA05B.toInt()),
+        DUSK("dusk", "Закат", "тепло и уют", R.style.ThemeOverlay_Georgia_Dusk, 0xFFB2552F.toInt(), 0xFFD98A4E.toInt()),
+        LAVENDER("lavender", "Лаванда", "мягкая расслабленность", R.style.ThemeOverlay_Georgia_Lavender, 0xFF6B5BC4.toInt(), 0xFF9A7BD8.toInt()),
+        GRAPHITE("graphite", "Графит", "нейтральный фокус", R.style.ThemeOverlay_Georgia_Graphite, 0xFF3D4A5C.toInt(), 0xFF5E6B7E.toInt()),
+        CONTRAST("contrast", "Контраст", "максимальная читаемость: чёрное и белое, жёлтый в тёмном", R.style.ThemeOverlay_Georgia_Contrast, 0xFF0B3DDB.toInt(), 0xFFFFD400.toInt()),
+        NEON("neon", "Неон", "яркие акценты: пурпур днём, циан ночью", R.style.ThemeOverlay_Georgia_Neon, 0xFFD100B3.toInt(), 0xFF00E5FF.toInt())
     }
 
     private fun palette(): Palette {
@@ -156,23 +160,35 @@ class MainActivity : AppCompatActivity() {
         return Palette.values().firstOrNull { it.key == k } ?: Palette.OCEAN
     }
 
-    private fun showPaletteDialog() {
-        val all = Palette.values()
-        val items = all.map {
-            SpannableString("●  ${it.title} — ${it.hint}").apply {
-                setSpan(ForegroundColorSpan(it.swatch), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-        }.toTypedArray<CharSequence>()
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Цветовая тема")
-            .setSingleChoiceItems(items, all.indexOf(palette())) { _, which ->
-                if (all[which] != palette()) {
-                    // the UI overlay and the map style are rebuilt with the new palette; the chooser reopens afterwards
-                    prefs.edit().putString("palette", all[which].key).putString("reopen", "palette").apply()
-                    recreate()
-                }
-            }
-            .setPositiveButton("Готово", null).show()
+    private fun nightFor(m: String): Boolean = when (m) {
+        "dark", "twilight" -> true
+        "light" -> false
+        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+
+    /** One screen for mode (auto / light / twilight / dark) and colour theme; it reopens after each change so themes can be tried in a row. */
+    private fun showAppearanceDialog() {
+        val modes = listOf(
+            ModeItem("auto", "Авто", "Следует настройке телефона: днём светлый, ночью тёмный."),
+            ModeItem("light", "Светлый", "Светлый интерфейс и карта. Лучше всего читается на солнце."),
+            ModeItem("twilight", "Сумерки", "Мягкий полутёмный режим между светлым и тёмным: меньше контраста, приятнее вечером и в помещении."),
+            ModeItem("dark", "Тёмный", "Тёмный интерфейс и карта. Экономит батарею и не слепит ночью.")
+        )
+        val pals = Palette.values().map { PaletteItem(it.key, it.title, it.hint, it.swatch, it.swatch2) }
+        AppearanceUi.show(this, themeMode(), palette().key, modes, pals,
+            { m -> changeMode(m) },
+            { k ->
+                prefs.edit().putString("palette", k).putString("reopen", "appearance").apply()
+                recreate()   // the UI overlay and the map style are rebuilt; the screen reopens afterwards
+            })
+    }
+
+    private fun changeMode(m: String) {
+        val before = nightFor(themeMode())
+        prefs.edit().putString("theme_mode", m).putString("reopen", "appearance").apply()
+        applyThemeMode(m)                      // recreates the activity when light <-> dark changes
+        if (nightFor(m) == before) recreate()  // e.g. dark <-> twilight: same night state, so rebuild explicitly
     }
 
     /** "auto" follows the system, "light" / "dark" force the app UI and the map style. */
@@ -187,23 +203,19 @@ class MainActivity : AppCompatActivity() {
         AppCompatDelegate.setDefaultNightMode(
             when (m) {
                 "light" -> AppCompatDelegate.MODE_NIGHT_NO
-                "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+                "dark", "twilight" -> AppCompatDelegate.MODE_NIGHT_YES
                 else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
             }
         )
     }
 
-    private fun isNight(): Boolean = when (themeMode()) {
-        "dark" -> true
-        "light" -> false
-        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-    }
+    private fun isNight(): Boolean = nightFor(themeMode())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyThemeMode(themeMode())
         super.onCreate(savedInstanceState)
         theme.applyStyle(palette().styleRes, true)   // colour theme, before any view is inflated
+        if (themeMode() == "twilight") theme.applyStyle(R.style.ThemeOverlay_Georgia_Twilight, true)
         MapLibre.getInstance(this)
         setContentView(R.layout.activity_main)
         setupEdgeToEdge()
@@ -235,6 +247,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         navProfile = prefs.getInt("nav_profile", Profile.CAR)
+        findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
+        refreshRecButton()
+        findViewById<View>(R.id.btnRouteTo).setOnClickListener {
+            pendingFrom = null
+            src("ovl-sel")?.setGeoJson(Geo.pointFc(emptyList()))
+            planRoute()
+        }
+        findViewById<View>(R.id.btnRouteFrom).setOnClickListener { routeFromHere() }
         compass = CompassController(this, object : CompassController.Host {
             override fun origin(): CompassController.Origin? {
                 myLoc?.let { return CompassController.Origin(it.latitude, it.longitude, if (it.hasAltitude()) it.altitude else 0.0, "GPS") }
@@ -257,7 +277,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnNavGo).setOnClickListener {
             when (navMode) {
                 NavMode.PLACE -> planRoute()
-                NavMode.PREVIEW -> startNav()
+                NavMode.PREVIEW -> if (pendingFrom != null) stopNav() else startNav()
                 NavMode.ACTIVE -> stopNav()
                 NavMode.IDLE -> {}
             }
@@ -303,10 +323,10 @@ class MainActivity : AppCompatActivity() {
         val what = prefs.getString("reopen", "") ?: ""
         if (what.isEmpty()) return
         prefs.edit().remove("reopen").apply()
-        ui.post { if (what == "palette") showPaletteDialog() else if (what == "mode") showModeDialog() }
+        ui.post { if (what == "appearance") showAppearanceDialog() }
     }
 
-    override fun onStart() { super.onStart(); reopenPending(); mapView.onStart(); compass.onStart(); if (locActive) startLocation(false) }
+    override fun onStart() { super.onStart(); reopenPending(); refreshRecButton(); mapView.onStart(); compass.onStart(); if (locActive) startLocation(false) }
     override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick() }
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
     override fun onStop() { stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
@@ -443,7 +463,11 @@ class MainActivity : AppCompatActivity() {
             true
         }
         m.addOnMapClickListener { ll ->
-            if (rulerOn) { rulerPts.add(ll); refreshRuler(); true } else false
+            if (rulerOn) { rulerPts.add(ll); refreshRuler(); true }
+            else {
+                val w = if (navMode == NavMode.ACTIVE) null else nearestWaypoint(m, ll)
+                if (w != null) { pendingFrom = null; setDestination(LatLng(w.lat, w.lon), w.name); true } else false
+            }
         }
         loadStyle()
     }
@@ -550,7 +574,14 @@ class MainActivity : AppCompatActivity() {
         s.addLayer(LineLayer("ovl-route-l", "ovl-route").withProperties(
             PropertyFactory.lineColor(themeHex(R.attr.gmAccent)), PropertyFactory.lineWidth(6.5f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        s.addSource(GeoJsonSource("ovl-sel"))
+        s.addLayer(CircleLayer("ovl-sel-c", "ovl-sel").withProperties(
+            PropertyFactory.circleRadius(10f), PropertyFactory.circleColor("#ffffff"),
+            PropertyFactory.circleStrokeColor(themeHex(R.attr.gmAccent)), PropertyFactory.circleStrokeWidth(4f)))
         s.addSource(GeoJsonSource("ovl-dest"))
+        s.addLayer(CircleLayer("ovl-dest-halo", "ovl-dest").withProperties(
+            PropertyFactory.circleRadius(20f), PropertyFactory.circleColor("#00000000"),
+            PropertyFactory.circleStrokeColor(themeHex(R.attr.gmAccent)), PropertyFactory.circleStrokeWidth(4f)))
         s.addLayer(CircleLayer("ovl-dest-c", "ovl-dest").withProperties(
             PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(themeHex(R.attr.gmCrosshair)),
             PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
@@ -582,6 +613,19 @@ class MainActivity : AppCompatActivity() {
         s.addLayer(CircleLayer("ovl-me-c", "ovl-me").withProperties(
             PropertyFactory.circleRadius(8f), PropertyFactory.circleColor("#2979ff"),
             PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
+    }
+
+    /** The saved point under the finger (within ~36 dp on screen), if any. */
+    private fun nearestWaypoint(m: MapLibreMap, ll: LatLng): UserDb.Wpt? {
+        val tap = m.projection.toScreenLocation(ll)
+        var best: UserDb.Wpt? = null
+        var bestD = dp(36f).toFloat()
+        for (w in userDb.waypoints()) {
+            val q = m.projection.toScreenLocation(LatLng(w.lat, w.lon))
+            val d = Math.hypot((q.x - tap.x).toDouble(), (q.y - tap.y).toDouble()).toFloat()
+            if (d < bestD) { bestD = d; best = w }
+        }
+        return best
     }
 
     private fun themeColorInt(attr: Int): Int {
@@ -781,9 +825,8 @@ class MainActivity : AppCompatActivity() {
     private fun showMenu() {
         val langs = enabledLanguages().joinToString(" · ") { it.name }.ifEmpty { "выкл" }
         val hasRelief = File(filesDir, "relief.mbtiles").exists()
-        val rec = TrackService.running
         val poiN = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).size
-        val modeName = when (themeMode()) { "light" -> "Светлый"; "dark" -> "Тёмный"; else -> "Как в системе" }
+        val modeName = when (themeMode()) { "light" -> "светлый"; "dark" -> "тёмный"; "twilight" -> "сумерки"; else -> "авто" }
         MenuUi.show(
             this, "Меню",
             listOf(
@@ -791,7 +834,6 @@ class MainActivity : AppCompatActivity() {
                 MenuTile(R.drawable.ic_compass, "Компас", false) { compass.show(CompassController.Mode.NORTH) },
                 MenuTile(R.drawable.ic_qibla, "Кибла", false) { compass.show(CompassController.Mode.QIBLA) },
                 MenuTile(R.drawable.ic_bookmark, "Точки", false) { showWaypoints() },
-                MenuTile(if (rec) R.drawable.ic_stop else R.drawable.ic_record, if (rec) "Стоп" else "Запись", rec) { toggleRecording() },
                 MenuTile(R.drawable.ic_straighten, "Линейка", rulerOn) {
                     rulerOn = !rulerOn
                     if (!rulerOn) rulerPts.clear()
@@ -809,8 +851,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 )),
                 MenuSection("Оформление", listOf(
-                    MenuRow.Link("Режим", modeName) { showModeDialog() },
-                    MenuRow.Link("Цветовая тема", palette().title) { showPaletteDialog() }
+                    MenuRow.Link("Оформление", palette().title + " · " + modeName) { showAppearanceDialog() }
                 )),
                 MenuSection("Навигация", listOf(
                     MenuRow.Toggle("Голосовые подсказки", "Нужен русский голос в системе",
@@ -818,6 +859,12 @@ class MainActivity : AppCompatActivity() {
                     MenuRow.Link("Транспорт по умолчанию", profileName(navProfile)) { showNavProfileDialog() }
                 )),
                 MenuSection("Мои данные", listOf(
+                    MenuRow.Toggle("Кнопка записи трека", "На главном экране справа; выключите, если запись не нужна",
+                        prefs.getBoolean("rec_button", true)) { on ->
+                        prefs.edit().putBoolean("rec_button", on).apply()
+                        if (!on && TrackService.running) toggleRecording()   // hiding the button also stops a running recording
+                        refreshRecButton()
+                    },
                     MenuRow.Link("Мои треки") { showTracks() },
                     MenuRow.Link("Перейти к координатам") { gotoCoordinatesDialog() },
                     MenuRow.Link("Экспорт GPX") {
@@ -835,19 +882,6 @@ class MainActivity : AppCompatActivity() {
                 ))
             )
         )
-    }
-
-    private fun showModeDialog() {
-        val keys = listOf("auto", "light", "dark")
-        val names = arrayOf("Как в системе", "Светлый", "Тёмный")
-        MaterialAlertDialogBuilder(this).setTitle("Режим оформления")
-            .setSingleChoiceItems(names, keys.indexOf(themeMode())) { _, which ->
-                if (keys[which] != themeMode()) {
-                    prefs.edit().putString("theme_mode", keys[which]).putString("reopen", "mode").apply()
-                    applyThemeMode(keys[which])   // recreates the activity: UI and map style both switch
-                }
-            }
-            .setPositiveButton("Готово", null).show()
     }
 
     private fun showLanguageDialog() {
@@ -931,12 +965,24 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ tracks
 
+    /** The record button lives in the control capsule on the map; the menu setting shows or hides it. */
+    private fun refreshRecButton() {
+        val btn = findViewById<android.widget.ImageButton>(R.id.btnRec)
+        val on = prefs.getBoolean("rec_button", true)
+        val rec = TrackService.running
+        btn.visibility = if (on) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.recDivider).visibility = if (on) View.VISIBLE else View.GONE
+        btn.setImageResource(if (rec) R.drawable.ic_stop else R.drawable.ic_record)
+        btn.setBackgroundResource(if (rec) R.drawable.bg_rec_active else R.drawable.bg_icon_btn)
+        btn.contentDescription = if (rec) "Остановить запись трека" else "Начать запись трека"
+    }
+
     private fun toggleRecording() {
         if (TrackService.running) {
             val savedId = prefs.getLong("rec_track", 0L)
             stopService(Intent(this, TrackService::class.java))
             prefs.edit().putLong("rec_track", 0L).apply()
-            ui.postDelayed({ refreshTrack(); updateInfo() }, 400)
+            ui.postDelayed({ refreshTrack(); updateInfo(); refreshRecButton() }, 400)
             MaterialAlertDialogBuilder(this).setTitle("Трек сохранён")
                 .setMessage("Запись остановлена, маршрут сохранён на телефоне.\n\nНайти его: Меню → «Мои данные» → «Мои треки». " +
                     "Там трек можно показать на карте или удалить, а «Экспорт GPX» сохранит файл для других программ.")
@@ -952,7 +998,7 @@ class MainActivity : AppCompatActivity() {
             shownTrackId = id
             ContextCompat.startForegroundService(this, Intent(this, TrackService::class.java))
             startLocation(false)
-            ui.postDelayed({ scheduleTick(); updateInfo() }, 800)
+            ui.postDelayed({ scheduleTick(); updateInfo(); refreshRecButton() }, 800)
             toast("Запись трека началась")
         }
     }
@@ -1196,7 +1242,16 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton(android.R.string.cancel, null).show()
     }
 
-    private fun openNavigatorChooser() {
+    /** "Route from here": the selected place becomes the start, the destination is chosen next. */
+    private fun routeFromHere() {
+        val here = navDest ?: return
+        pendingFrom = here
+        pendingFromName = navDestName
+        src("ovl-sel")?.setGeoJson(Geo.pointFc(listOf(here)))
+        openNavigatorChooser("Маршрут от «" + navDestName + "»: куда едем?", true)
+    }
+
+    private fun openNavigatorChooser(title: String = "Навигатор: куда едем?", fromMode: Boolean = false) {
         if (navMode == NavMode.ACTIVE) {
             MaterialAlertDialogBuilder(this).setMessage("Завершить текущую навигацию?")
                 .setPositiveButton("Завершить") { _, _ -> stopNav() }
@@ -1204,7 +1259,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val items = arrayOf("Точку на карте", "В одну из моих точек", "По координатам", "Найти место через поиск")
-        MaterialAlertDialogBuilder(this).setTitle("Навигатор: куда едем?").setItems(items) { _, i ->
+        MaterialAlertDialogBuilder(this).setTitle(title).setOnCancelListener {
+            if (fromMode) { pendingFrom = null; src("ovl-sel")?.setGeoJson(Geo.pointFc(emptyList())) }
+        }.setItems(items) { _, i ->
             when (i) {
                 0 -> map?.cameraPosition?.target?.let { setDestination(it, Geo.fmtCoord(it.latitude, it.longitude)) }
                 1 -> {
@@ -1225,6 +1282,7 @@ class MainActivity : AppCompatActivity() {
                         }.setNegativeButton("Отмена", null).show()
                 }
                 else -> {
+                    if (fromMode) toast("Найдите место и нажмите на результат")
                     etSearch.requestFocus()
                     (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(etSearch, InputMethodManager.SHOW_IMPLICIT)
                 }
@@ -1241,6 +1299,7 @@ class MainActivity : AppCompatActivity() {
         src("ovl-dest")?.setGeoJson(Geo.pointFc(listOf(ll)))
         navMode = NavMode.PLACE
         updateNavUi()
+        if (pendingFrom != null) planRoute()
     }
 
     private fun chooseProfile(p: Int) {
@@ -1264,10 +1323,20 @@ class MainActivity : AppCompatActivity() {
         else -> String.format(Locale.US, "%.1f км", m / 1000.0)
     }
 
-    private fun setSummary(remM: Double, remS: Double) {
+    private fun setSummary(remM: Double, remS: Double, note: String = "") {
         findViewById<TextView>(R.id.navMain).text = Geo.fmtDist(remM) + " · " + fmtDur(remS)
         findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
-            if (navDestName.isNotBlank()) "\n" + navDestName else ""
+            (if (pendingFrom != null) "\nот «$pendingFromName»" else "") +
+            (if (navDestName.isNotBlank()) "\n→ $navDestName" else "") +
+            (if (note.isNotEmpty()) "\n$note" else "")
+    }
+
+    /** When there is no road next to a point, the nearest one is used: say how far it is. */
+    private fun offRoadNote(r: RouteResult): String {
+        val parts = ArrayList<String>()
+        if (r.startOffM > 80) parts.add("старт: ближайшая дорога в " + Geo.fmtDist(r.startOffM))
+        if (r.endOffM > 80) parts.add("финиш: ближайшая дорога в " + Geo.fmtDist(r.endOffM))
+        return parts.joinToString(", ")
     }
 
     /** One bottom bar serves three states: a chosen place, a route preview, active guidance. */
@@ -1283,7 +1352,15 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnNavClose).visibility = if (active) View.GONE else View.VISIBLE
         val go = findViewById<TextView>(R.id.btnNavGo)
         go.setBackgroundResource(if (active) R.drawable.bg_btn_danger else R.drawable.bg_btn_primary)
-        go.text = when (mode) { NavMode.PLACE -> "Маршрут"; NavMode.PREVIEW -> "Начать"; NavMode.ACTIVE -> "Завершить"; else -> "" }
+        go.text = when (mode) {
+            NavMode.PLACE -> "Маршрут"
+            NavMode.PREVIEW -> if (pendingFrom != null) "Закрыть" else "Начать"
+            NavMode.ACTIVE -> "Завершить"
+            else -> ""
+        }
+        // a chosen place offers "route here" / "route from here"; the single big button is for preview and guidance
+        findViewById<View>(R.id.navPlaceActions).visibility = if (mode == NavMode.PLACE) View.VISIBLE else View.GONE
+        go.visibility = if (mode == NavMode.PLACE) View.GONE else View.VISIBLE
         listOf(R.id.navProfCar to Profile.CAR, R.id.navProfFoot to Profile.FOOT, R.id.navProfBike to Profile.BIKE).forEach { (id, p) ->
             val v = findViewById<TextView>(id)
             val sel = p == navProfile
@@ -1295,7 +1372,7 @@ class MainActivity : AppCompatActivity() {
                 findViewById<TextView>(R.id.navMain).text = navDestName
                 findViewById<TextView>(R.id.navSub).text = navDest?.let { Geo.fmtCoord(it.latitude, it.longitude) } ?: ""
             }
-            NavMode.PREVIEW -> session?.let { setSummary(it.totalM, it.route.timeS) }
+            NavMode.PREVIEW -> session?.let { setSummary(it.totalM, it.route.timeS, offRoadNote(it.route)) }
             else -> {}
         }
         bar.post { updateControlsMargin() }
@@ -1303,7 +1380,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun planRoute() {
         val dest = navDest ?: return
-        val from = myLoc?.let { LatLng(it.latitude, it.longitude) } ?: routeFrom
+        val from = pendingFrom ?: myLoc?.let { LatLng(it.latitude, it.longitude) } ?: routeFrom
         if (from == null) {
             MaterialAlertDialogBuilder(this)
                 .setMessage("Нет сигнала GPS. Построить маршрут от центра карты или включить GPS?")
@@ -1412,6 +1489,9 @@ class MainActivity : AppCompatActivity() {
         session = null
         navDest = null
         routeFrom = null
+        pendingFrom = null
+        pendingFromName = ""
+        src("ovl-sel")?.setGeoJson(Geo.pointFc(emptyList()))
         rerouting = false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         tts?.stop()

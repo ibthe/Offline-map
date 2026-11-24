@@ -130,10 +130,10 @@ jobs:
           rm -rf app/src/main/assets/glyphs
           python tools/build_glyphs.py app/src/main/assets/glyphs/NotoSans
 
-      - name: Generate map styles (5 colour themes x light/dark)
+      - name: Generate map styles (7 colour themes x light/dark)
         run: |
           rm -f app/src/main/assets/style*.json
-          for P in ocean forest dusk lavender graphite; do
+          for P in ocean forest dusk lavender graphite contrast neon; do
             python tools/gen_style.py app/src/main/assets/style_$P.json --palette=$P
             python tools/gen_style.py app/src/main/assets/style_${P}_dark.json --dark --palette=$P
           done

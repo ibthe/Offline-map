@@ -1,5 +1,6 @@
 package app.georgiamap
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -15,6 +16,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -126,7 +128,60 @@ class CompassView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     }
 }
 
-/** Compass sheet: north / qibla / any point, with sensor handling. The activity only supplies data through [Host]. */
+/** Animated figure-8 that shows how to move the phone for calibration. */
+class CalibView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
+    var colTrack = Color.LTGRAY
+    var colDot = Color.BLUE
+    private val d = resources.displayMetrics.density
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val path = Path()
+    private var t = 0f
+    private var anim: ValueAnimator? = null
+
+    private fun px(t: Float, a: Float, cx: Float): Float { val s = sin(t); return cx + a * cos(t) / (1 + s * s) }
+    private fun py(t: Float, a: Float, cy: Float): Float { val s = sin(t); return cy + a * 0.9f * s * cos(t) / (1 + s * s) }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        anim = ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
+            duration = 2600
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { t = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() { anim?.cancel(); anim = null; super.onDetachedFromWindow() }
+
+    override fun onDraw(c: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val a = min(width / 2f - 24 * d, height * 0.9f)
+        path.reset()
+        var k = 0f
+        path.moveTo(px(0f, a, cx), py(0f, a, cy))
+        while (k <= 6.2832f) { path.lineTo(px(k, a, cx), py(k, a, cy)); k += 0.05f }
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 5 * d
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.color = colTrack
+        c.drawPath(path, paint)
+        // fading trail behind the dot, then the dot
+        paint.style = Paint.Style.FILL
+        for (i in 12 downTo 1) {
+            val tt = t - i * 0.07f
+            paint.color = colDot
+            paint.alpha = (255 * (1f - i / 13f) * 0.6f).toInt()
+            c.drawCircle(px(tt, a, cx), py(tt, a, cy), (4 + (13 - i) * 0.5f) * d, paint)
+        }
+        paint.alpha = 255
+        paint.color = colDot
+        c.drawCircle(px(t, a, cx), py(t, a, cy), 11 * d, paint)
+    }
+}
+
+/** Compass sheet: north / qibla / any point, with calibration and sensor handling. The activity only supplies data through [Host]. */
 class CompassController(private val act: AppCompatActivity, private val host: Host) {
     class Target(val name: String, val lat: Double, val lon: Double)
     class Origin(val lat: Double, val lon: Double, val alt: Double, val label: String)
@@ -142,14 +197,22 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         fun toast(msg: String)
     }
 
+    private val prefs = act.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val sm = act.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rot: Sensor? = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+    private val mag: Sensor? = sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
     private var registered = false
     private var sheetOpen = false
     private var mapFollow = false
     private var mode = Mode.NORTH
     private var point: Target? = null
-    private var accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
+    private var rotAccuracy = -1
+    private var magAccuracy = -1          // -1 = the sensor has not reported yet
+    private var fieldUt = Float.NaN
+    private var calibrating = false
+    private var calibForced = false       // first ever use: the user has to confirm
+    private var calibDismissed = false    // "continue anyway" was pressed in this session
+    private var calibOkSince = 0L
 
     private var sx = 0.0
     private var sy = 0.0
@@ -165,9 +228,14 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
     private var tvMain: TextView? = null
     private var tvTurn: TextView? = null
     private var tvSub: TextView? = null
+    private var mainGroup: View? = null
+    private var calibGroup: View? = null
+    private var tvCalibStatus: TextView? = null
+    private var tvCalibField: TextView? = null
+    private var btnCalibDone: TextView? = null
     private var chips: List<Pair<Mode, TextView>> = emptyList()
 
-    private val listener = object : SensorEventListener {
+    private val rotListener = object : SensorEventListener {
         private val r = FloatArray(9)
         private val r2 = FloatArray(9)
         private val o = FloatArray(3)
@@ -183,7 +251,21 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
             onHeading((Math.toDegrees(az) + declination + 360.0) % 360.0)
         }
 
-        override fun onAccuracyChanged(s: Sensor?, a: Int) { accuracy = a }
+        override fun onAccuracyChanged(s: Sensor?, a: Int) { rotAccuracy = a }
+    }
+
+    /** The magnetometer is only listened to for its calibration status and field strength. */
+    private val magListener = object : SensorEventListener {
+        override fun onSensorChanged(e: SensorEvent) {
+            val v = e.values
+            fieldUt = Math.sqrt((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).toDouble()).toFloat()
+        }
+
+        override fun onAccuracyChanged(s: Sensor?, a: Int) {
+            magAccuracy = a
+            // the sensor says it is badly calibrated: ask for the figure-8 once per opening of the compass
+            if (sheetOpen && !calibrating && !calibDismissed && a <= SensorManager.SENSOR_STATUS_ACCURACY_LOW) showCalib(true)
+        }
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -196,12 +278,14 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         if (registered) return
         if (rot == null) { host.toast("В телефоне нет датчика ориентации"); return }
         refreshDeclination()
-        registered = sm.registerListener(listener, rot, SensorManager.SENSOR_DELAY_GAME)
+        registered = sm.registerListener(rotListener, rot, SensorManager.SENSOR_DELAY_GAME)
+        if (mag != null) sm.registerListener(magListener, mag, SensorManager.SENSOR_DELAY_UI)
     }
 
     private fun unregister() {
         if (!registered) return
-        sm.unregisterListener(listener)
+        sm.unregisterListener(rotListener)
+        sm.unregisterListener(magListener)
         registered = false
         have = false
     }
@@ -212,6 +296,16 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         declAt = System.currentTimeMillis()
     }
 
+    private fun accuracy() = if (magAccuracy >= 0) magAccuracy else rotAccuracy
+    private fun accuracyName(a: Int) = when (a) {
+        SensorManager.SENSOR_STATUS_ACCURACY_HIGH -> "высокая"
+        SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM -> "средняя"
+        SensorManager.SENSOR_STATUS_ACCURACY_LOW -> "низкая"
+        SensorManager.SENSOR_STATUS_UNRELIABLE -> "ненадёжная"
+        else -> "определяется…"
+    }
+    private fun fieldOk() = fieldUt.isNaN() || (fieldUt in 25f..65f)
+
     private fun onHeading(h: Double) {
         val a = Math.toRadians(h)
         if (!have) { sx = cos(a); sy = sin(a); have = true } else { sx += 0.18 * (cos(a) - sx); sy += 0.18 * (sin(a) - sy) }
@@ -219,7 +313,39 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         val now = System.currentTimeMillis()
         if (now - declAt > 60_000) refreshDeclination()
         if (mapFollow && now - lastMap > 200) { lastMap = now; host.setMapBearing(heading) }
-        if (sheetOpen && now - lastUi > 50) { lastUi = now; refresh() }
+        if (sheetOpen && now - lastUi > 50) { lastUi = now; if (calibrating) refreshCalib(now) else refresh() }
+    }
+
+    // ---------------------------------------------------------------- calibration page
+    private fun showCalib(on: Boolean) {
+        calibrating = on
+        calibOkSince = 0L
+        mainGroup?.visibility = if (on) View.GONE else View.VISIBLE
+        calibGroup?.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) refreshCalib(System.currentTimeMillis()) else refresh()
+    }
+
+    private fun refreshCalib(now: Long) {
+        val a = accuracy()
+        val good = a >= SensorManager.SENSOR_STATUS_ACCURACY_HIGH && fieldOk()
+        tvCalibStatus?.text = "Точность компаса: " + accuracyName(a) + if (good) " ✓" else ""
+        tvCalibField?.text = if (fieldUt.isNaN()) "Магнитное поле: измеряю…"
+        else if (fieldOk()) "Магнитное поле: ${fieldUt.roundToInt()} мкТл (норма 25–65)"
+        else "Магнитное поле: ${fieldUt.roundToInt()} мкТл. " + (if (fieldUt > 65f) "Слишком сильное" else "Слишком слабое") +
+            ": отойдите от металла, магнитов, колонок и проводов (машина, лифт и здание тоже мешают)."
+        btnCalibDone?.text = if (good) "Готово, к компасу" else "Всё равно продолжить"
+        if (good) {
+            if (calibOkSince == 0L) calibOkSince = now
+            // after the first confirmed use the page closes itself once the sensor has been fine for 2 s
+            if (!calibForced && now - calibOkSince > 2000) finishCalib()
+        } else calibOkSince = 0L
+    }
+
+    private fun finishCalib() {
+        calibForced = false
+        calibDismissed = true
+        prefs.edit().putBoolean("calib_seen", true).apply()
+        showCalib(false)
     }
 
     // ---------------------------------------------------------------- target
@@ -235,7 +361,7 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         val v = view ?: return
         val o = host.origin()
         var bearing = Double.NaN
-        var main: String
+        val main: String
         var distance = ""
         if (mode == Mode.NORTH) {
             bearing = 0.0
@@ -255,7 +381,8 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         v.target = if (bearing.isNaN()) Float.NaN else bearing.toFloat()
         val d = if (bearing.isNaN() || h.isNaN()) Double.NaN else CompassMath.turn(bearing, h)
         val was = alignedNow
-        alignedNow = !d.isNaN() && abs(d) <= (if (was) 6.0 else 3.0)
+        // the arrow is only trusted when the sensor is reasonably calibrated
+        alignedNow = !d.isNaN() && abs(d) <= (if (was) 6.0 else 3.0) && accuracy() >= SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM
         if (alignedNow && !was) buzz()
         v.aligned = alignedNow
         tvMain?.text = main
@@ -270,7 +397,10 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         if (have) parts.add("Телефон смотрит на ${heading.roundToInt()}° ${CompassMath.cardinal(heading)}")
         if (distance.isNotEmpty()) parts.add(distance)
         if (mode != Mode.NORTH) parts.add(if (o == null) "позиция неизвестна" else "позиция: ${o.label}")
-        if (accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW) parts.add("компас неточен: покачайте телефон «восьмёркой»")
+        val a = accuracy()
+        parts.add("точность компаса: " + accuracyName(a) +
+            if (a in 0..SensorManager.SENSOR_STATUS_ACCURACY_LOW) " — откалибруйте (ссылка ниже)" else "")
+        if (!fieldOk()) parts.add("рядом сильные помехи магнитному полю")
         tvSub?.text = parts.joinToString("\n")
         chips.forEach { (m, tv) ->
             val sel = m == mode
@@ -293,6 +423,8 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
     // ---------------------------------------------------------------- UI
     fun show(start: Mode) {
         mode = start
+        calibDismissed = false
+        calibForced = !prefs.getBoolean("calib_seen", false)
         val dialog = BottomSheetDialog(act)
         val root = act.layoutInflater.inflate(R.layout.sheet_compass, null)
         val v = root.findViewById<CompassView>(R.id.cmpView)
@@ -304,6 +436,21 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         v.colNorth = color(R.attr.gmCrosshair, Color.RED)
         v.colOk = 0xFF2FA866.toInt()
         view = v
+        val cv = root.findViewById<CalibView>(R.id.cmpCalibView)
+        cv.colTrack = color(R.attr.gmAccentContainer, Color.LTGRAY)
+        cv.colDot = color(R.attr.gmAccent, Color.BLUE)
+        mainGroup = root.findViewById(R.id.cmpMainGroup)
+        calibGroup = root.findViewById(R.id.cmpCalibGroup)
+        tvCalibStatus = root.findViewById(R.id.cmpCalibStatus)
+        tvCalibField = root.findViewById(R.id.cmpCalibField)
+        btnCalibDone = root.findViewById(R.id.cmpCalibDone)
+        root.findViewById<TextView>(R.id.cmpCalibSteps).text =
+            "1. Отойдите от металла, магнитов, чехлов-магнитов, колонок и проводов. Лучше на улице.\n" +
+            "2. Возьмите телефон в руку и плавно рисуйте им в воздухе «восьмёрку» (∞): как показано выше, с наклоном и поворотом кисти.\n" +
+            "3. Повторите 5–10 раз, пока не появится «Точность компаса: высокая ✓».\n" +
+            "4. Держите телефон ровно, не рядом с другими устройствами. После этого нажмите «Готово»."
+        btnCalibDone?.setOnClickListener { finishCalib() }
+        root.findViewById<View>(R.id.cmpCalibLink).setOnClickListener { calibForced = false; showCalib(true) }
         tvMain = root.findViewById(R.id.cmpMain)
         tvTurn = root.findViewById(R.id.cmpTurn)
         tvSub = root.findViewById(R.id.cmpSub)
@@ -326,9 +473,14 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.setBackgroundResource(R.drawable.bg_sheet)
         dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
         dialog.behavior.skipCollapsed = true
-        dialog.setOnDismissListener { sheetOpen = false; view = null; updateSensors() }
+        dialog.setOnDismissListener {
+            sheetOpen = false; view = null; mainGroup = null; calibGroup = null
+            tvCalibStatus = null; tvCalibField = null; btnCalibDone = null; calibrating = false
+            updateSensors()
+        }
         sheetOpen = true
-        refresh()
+        // the very first use always starts with the calibration page
+        showCalib(calibForced)
         updateSensors()
         dialog.show()
     }

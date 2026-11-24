@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generates the map style (OpenMapTiles schema, fully offline).
-Usage: gen_style.py <out.json> [--dark] [--palette=ocean|forest|dusk|lavender|graphite]
+Usage: gen_style.py <out.json> [--dark] [--palette=ocean|forest|dusk|lavender|graphite|contrast|neon]
 "Ocean" is the base look; the other palettes re-colour it (vegetation, water, warm tones, neutrals) so the map
 matches the colour theme chosen in the app."""
 import colorsys, json, re, sys
@@ -344,6 +344,12 @@ PALETTES = {
                  bg=("#f3ede3", "#1b1311")),
     "lavender": dict(veg=(148, 0.55), water=(224, 0.85), warm=(4, 0.78), neutral=(268, 0.08),
                      bg=("#efedf4", "#17142a")),
+    # high contrast: calm grey land, strong blue water, black/white text with a thick halo
+    "contrast": dict(veg=(130, 0.30), water=(212, 1.0), warm=(0, 0.55), neutral=(0, 0.0), other=0.4,
+                     bg=("#ffffff", "#000000"), labels=("#000000", "#ffffff")),
+    # neon: deep blue ground, teal vegetation, cyan roads at night; pastel with vivid roads by day
+    "neon": dict(veg=(165, 1.2), water=(225, 1.2), warm=(160, 1.0), neutral=(235, 0.10), other=1.2,
+                 bg=("#eef0ff", "#070a16")),
     "graphite": dict(veg=(120, 0.20), water=(210, 0.55), warm=(0, 0.55), neutral=(215, 0.03), other=0.3,
                      bg=("#eceeef", "#101113")),
 }
@@ -414,6 +420,13 @@ if pal:
     for l in style["layers"]:                         # the page colour itself is set explicitly
         if l["id"] == "background":
             l["paint"]["background-color"] = pal["bg"][1 if DARK else 0]
+    if "labels" in pal:                              # high-contrast labels
+        ink, halo = pal["labels"][1 if DARK else 0], pal["labels"][0 if DARK else 1]
+        for l in style["layers"]:
+            pt = l.get("paint", {})
+            if "text-color" in pt:
+                pt["text-color"], pt["text-halo-color"] = ink, halo
+                pt["text-halo-width"] = max(2.2, pt["text-halo-width"] if isinstance(pt.get("text-halo-width"), (int, float)) else 0)
     style["name"] = style["name"] + " " + PALETTE.capitalize()
 
 out = args[0] if args else "app/src/main/assets/style_ocean.json"

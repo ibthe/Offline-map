@@ -151,4 +151,83 @@
         <item name="colorSurfaceContainerHigh">#1B1D21</item>
         <item name="colorSurfaceContainerHighest">#1B1D21</item>
     </style>
+
+    <style name="ThemeOverlay.Georgia.Contrast" parent="">
+        <item name="gmPanel">#F2000000</item>
+        <item name="gmPanelStroke">#B3FFFFFF</item>
+        <item name="gmFab">#FF000000</item>
+        <item name="gmDialogBg">#0D0D0D</item>
+        <item name="gmTextPrimary">#FFFFFF</item>
+        <item name="gmTextSecondary">#E0E0E0</item>
+        <item name="gmHint">#B0B0B0</item>
+        <item name="gmIconTint">#FFFFFF</item>
+        <item name="gmDivider">#66FFFFFF</item>
+        <item name="gmAccent">#FFD400</item>
+        <item name="gmAccentEnd">#FFEA70</item>
+        <item name="gmOnAccent">#000000</item>
+        <item name="gmAccentContainer">#3A3200</item>
+        <item name="gmOnAccentContainer">#FFE866</item>
+        <item name="gmCrosshair">#FF7A85</item>
+        <item name="gmCrosshairHalo">#CC0E1116</item>
+        <item name="colorPrimary">#FFD400</item>
+        <item name="colorOnPrimary">#000000</item>
+        <item name="colorPrimaryContainer">#3A3200</item>
+        <item name="colorOnPrimaryContainer">#FFE866</item>
+        <item name="colorSecondaryContainer">#3A3200</item>
+        <item name="colorOnSecondaryContainer">#FFE866</item>
+        <item name="colorSurface">#000000</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorOnSurfaceVariant">#E0E0E0</item>
+        <item name="colorSurfaceContainer">#0D0D0D</item>
+        <item name="colorSurfaceContainerHigh">#0D0D0D</item>
+        <item name="colorSurfaceContainerHighest">#0D0D0D</item>
+    </style>
+    <style name="ThemeOverlay.Georgia.Neon" parent="">
+        <item name="gmPanel">#EE0E1224</item>
+        <item name="gmPanelStroke">#6600E5FF</item>
+        <item name="gmFab">#F210152C</item>
+        <item name="gmDialogBg">#121734</item>
+        <item name="gmTextPrimary">#EAF2FF</item>
+        <item name="gmTextSecondary">#9FB2D6</item>
+        <item name="gmHint">#7284A8</item>
+        <item name="gmIconTint">#DDE8FF</item>
+        <item name="gmDivider">#3300E5FF</item>
+        <item name="gmAccent">#00E5FF</item>
+        <item name="gmAccentEnd">#B388FF</item>
+        <item name="gmOnAccent">#00262B</item>
+        <item name="gmAccentContainer">#00424D</item>
+        <item name="gmOnAccentContainer">#B8F6FF</item>
+        <item name="gmCrosshair">#FF7A85</item>
+        <item name="gmCrosshairHalo">#CC0E1116</item>
+        <item name="colorPrimary">#00E5FF</item>
+        <item name="colorOnPrimary">#00262B</item>
+        <item name="colorPrimaryContainer">#00424D</item>
+        <item name="colorOnPrimaryContainer">#B8F6FF</item>
+        <item name="colorSecondaryContainer">#00424D</item>
+        <item name="colorOnSecondaryContainer">#B8F6FF</item>
+        <item name="colorSurface">#070A16</item>
+        <item name="colorOnSurface">#EAF2FF</item>
+        <item name="colorOnSurfaceVariant">#9FB2D6</item>
+        <item name="colorSurfaceContainer">#121734</item>
+        <item name="colorSurfaceContainerHigh">#121734</item>
+        <item name="colorSurfaceContainerHighest">#121734</item>
+    </style>
+    <!-- Twilight: the mode between light and dark (applied over the dark colours of the chosen theme) -->
+    <style name="ThemeOverlay.Georgia.Twilight" parent="">
+        <item name="colorSurface">#262C34</item>
+        <item name="gmPanel">#EE30373F</item>
+        <item name="gmPanelStroke">#55FFFFFF</item>
+        <item name="gmFab">#F2343C46</item>
+        <item name="gmDialogBg">#333B45</item>
+        <item name="colorSurfaceContainer">#333B45</item>
+        <item name="colorSurfaceContainerHigh">#333B45</item>
+        <item name="colorSurfaceContainerHighest">#333B45</item>
+        <item name="gmTextPrimary">#EEF1F5</item>
+        <item name="colorOnSurface">#EEF1F5</item>
+        <item name="gmTextSecondary">#BAC2CE</item>
+        <item name="colorOnSurfaceVariant">#BAC2CE</item>
+        <item name="gmHint">#8E98A6</item>
+        <item name="gmIconTint">#E4E9F0</item>
+        <item name="gmDivider">#33FFFFFF</item>
+    </style>
 </resources>
