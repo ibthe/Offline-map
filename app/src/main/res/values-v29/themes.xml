@@ -1,9 +1,0 @@
-<resources>
-    <style name="Theme.GeorgiaMap" parent="Base.Theme.GeorgiaMap">
-        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
-        <item name="android:windowLightNavigationBar">@bool/light_bars</item>
-        <!-- no grey scrim behind the transparent gesture/3-button bar -->
-        <item name="android:enforceNavigationBarContrast">false</item>
-        <item name="android:enforceStatusBarContrast">false</item>
-    </style>
-</resources>

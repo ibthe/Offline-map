@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "GeorgiaOfflineMap"
+rootProject.name = "VNMOff-Wolf"
 include(":app")

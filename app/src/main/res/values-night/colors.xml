@@ -1,21 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Ocean palette: defaults before a theme overlay is applied -->
-    <color name="surface">#0C1317</color>
-    <color name="panel">#EE111B21</color>
-    <color name="panel_stroke">#2AFFFFFF</color>
-    <color name="fab_bg">#F2152028</color>
-    <color name="dialog_bg">#17222A</color>
-    <color name="text_primary">#E6EEF2</color>
-    <color name="text_secondary">#97A9B3</color>
-    <color name="hint">#6F818C</color>
-    <color name="icon_tint">#D8E4EA</color>
-    <color name="divider_soft">#1FFFFFFF</color>
-    <color name="accent">#6CC0E0</color>
-    <color name="accent_end">#7FD6C4</color>
-    <color name="on_accent">#06303F</color>
-    <color name="accent_container">#19485C</color>
-    <color name="on_accent_container">#D4EEF8</color>
-    <color name="crosshair">#FF7A85</color>
-    <color name="crosshair_halo">#CC0E1116</color>
+    <color name="window_bg">#13121A</color>
 </resources>
