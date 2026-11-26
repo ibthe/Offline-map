@@ -74,6 +74,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
@@ -95,6 +97,14 @@ class MainActivity : AppCompatActivity() {
     private var tilesFile: File? = null
 
     private val ui = Handler(Looper.getMainLooper())
+    private val searchExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mapDataExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var searchRunnable: Runnable? = null
+    private var searchGeneration = 0
+    private var elevationGeneration = 0
+    private var elevationRequestLat = Double.NaN
+    private var elevationRequestLon = Double.NaN
+    private var cachedElevation: Int? = null
     private val errors = ArrayList<String>()
     private var searchResults: List<PlaceDb.Place> = emptyList()
 
@@ -303,7 +313,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 btnClear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
-                runSearch(s?.toString() ?: "")
+                scheduleSearch(s?.toString() ?: "")
             }
         })
         lvResults.setOnItemClickListener { _, _, pos, _ ->
@@ -336,7 +346,17 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
     override fun onStop() { stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
-    override fun onDestroy() { tts?.shutdown(); mapView.onDestroy(); super.onDestroy() }
+    override fun onDestroy() {
+        searchRunnable?.let { ui.removeCallbacks(it) }
+        searchExecutor.shutdownNow()
+        mapDataExecutor.shutdownNow()
+        placeDb?.close()
+        elevation?.close()
+        userDb.close()
+        tts?.shutdown()
+        mapView.onDestroy()
+        super.onDestroy()
+    }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
@@ -692,7 +712,9 @@ class MainActivity : AppCompatActivity() {
 
     /** The search list and the chips share the same place under the search pill. */
     private fun showResults(show: Boolean) {
-        lvResults.visibility = if (show) View.VISIBLE else View.GONE
+        val empty = findViewById<TextView>(R.id.tvSearchEmpty)
+        lvResults.visibility = if (show && searchResults.isNotEmpty()) View.VISIBLE else View.GONE
+        empty.visibility = if (show && searchResults.isEmpty()) View.VISIBLE else View.GONE
         findViewById<View>(R.id.chipsScroll).visibility = if (show) View.GONE else View.VISIBLE
     }
 
@@ -820,8 +842,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateInfo() {
         val m = map ?: return
         val c = m.cameraPosition.target ?: return
+        requestElevation(c.latitude, c.longitude)
         val sb = StringBuilder(Geo.fmtCoord(c.latitude, c.longitude))
-        elevation?.at(c.latitude, c.longitude)?.let { sb.append("  ·  ≈ $it м") }
+        cachedElevation?.let { sb.append("  ·  ≈ $it м") }
         sb.append("  ·  z").append(String.format(Locale.US, "%.1f", m.cameraPosition.zoom))
         myLoc?.let {
             sb.append("\nGPS: ±").append(it.accuracy.roundToInt()).append(" м")
@@ -833,30 +856,72 @@ class MainActivity : AppCompatActivity() {
         tvInfo.text = sb.toString()
     }
 
+    /** MBTiles lookup and PNG decode must not run on the UI thread during camera/GPS updates. */
+    private fun requestElevation(lat: Double, lon: Double) {
+        val movedEnough = elevationRequestLat.isNaN() ||
+            kotlin.math.abs(lat - elevationRequestLat) >= 0.0005 ||
+            kotlin.math.abs(lon - elevationRequestLon) >= 0.0005
+        if (!movedEnough || elevation == null) return
+        elevationRequestLat = lat
+        elevationRequestLon = lon
+        val token = ++elevationGeneration
+        mapDataExecutor.execute {
+            val value = try { elevation?.at(lat, lon) } catch (e: Exception) {
+                errors.add("elevation: $e")
+                null
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && token == elevationGeneration) {
+                    cachedElevation = value
+                    updateInfo()
+                }
+            }
+        }
+    }
+
     // ============================================================ search
 
-    private fun runSearch(q: String) {
-        if (q.trim().length < 2) {
+    private fun scheduleSearch(query: String) {
+        searchRunnable?.let { ui.removeCallbacks(it) }
+        val token = ++searchGeneration
+        val q = query.trim()
+        if (q.length < 2) {
+            searchResults = emptyList()
             showResults(false)
             return
         }
-        val db = placeDb
-        if (db == null) {
-            toast("Индекс поиска не найден в APK")
-            return
+
+        findViewById<TextView>(R.id.tvSearchEmpty).text = "Ищем…"
+        showResults(true)
+        val task = Runnable {
+            searchExecutor.execute {
+                val db = placeDb
+                val result = try { db?.search(q).orEmpty() } catch (e: Exception) {
+                    errors.add("search: $e")
+                    emptyList()
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || token != searchGeneration ||
+                        q != etSearch.text.toString().trim()) return@runOnUiThread
+                    searchResults = result
+                    val items = result.map { p ->
+                        val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
+                        val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
+                        names to extra
+                    }
+                    lvResults.adapter = ResultsAdapter(items)
+                    val dp = resources.displayMetrics.density
+                    lvResults.layoutParams = lvResults.layoutParams.apply {
+                        height = minOf((items.size.coerceAtLeast(1) * 64 * dp).roundToInt(), (320 * dp).roundToInt())
+                    }
+                    findViewById<TextView>(R.id.tvSearchEmpty).text =
+                        if (db == null) "Индекс поиска недоступен в этой сборке" else "Ничего не найдено"
+                    showResults(true)
+                }
+            }
         }
-        searchResults = db.search(q)
-        val items = searchResults.map { p ->
-            val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
-            val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
-            names to extra
-        }
-        lvResults.adapter = ResultsAdapter(items)
-        val dp = resources.displayMetrics.density
-        lvResults.layoutParams = lvResults.layoutParams.apply {
-            height = minOf((items.size * 64 * dp).roundToInt(), (320 * dp).roundToInt())
-        }
-        showResults(items.isNotEmpty())
+        searchRunnable = task
+        ui.postDelayed(task, 250L)
     }
 
     private inner class ResultsAdapter(private val items: List<Pair<String, String>>) : BaseAdapter() {
@@ -973,9 +1038,9 @@ class MainActivity : AppCompatActivity() {
             this, "Меню",
             listOf(
                 MenuTile(R.drawable.ic_navigation, "Навигатор", navMode != NavMode.IDLE) { openNavigatorChooser() },
+                // Qibla is a mode inside the compass, not a second entry point to the same tool.
                 MenuTile(R.drawable.ic_compass, "Компас", false) { compass.show(CompassController.Mode.NORTH) },
-                MenuTile(R.drawable.ic_qibla, "Кибла", false) { compass.show(CompassController.Mode.QIBLA) },
-                MenuTile(R.drawable.ic_bookmark, "Точки", false) { showWaypoints() },
+                MenuTile(R.drawable.ic_bookmark, "Мои точки", false) { showWaypoints() },
                 MenuTile(R.drawable.ic_straighten, "Линейка", rulerOn) {
                     rulerOn = !rulerOn
                     if (!rulerOn) rulerPts.clear()
@@ -1005,12 +1070,6 @@ class MainActivity : AppCompatActivity() {
                     MenuRow.Link("Транспорт по умолчанию", profileName(navProfile)) { showNavProfileDialog() }
                 )),
                 MenuSection("Мои данные", listOf(
-                    MenuRow.Toggle("Кнопка записи трека", "На главном экране справа; выключите, если запись не нужна",
-                        prefs.getBoolean("rec_button", true)) { on ->
-                        prefs.edit().putBoolean("rec_button", on).apply()
-                        if (!on && TrackService.running) toggleRecording()   // hiding the button also stops a running recording
-                        refreshRecButton()
-                    },
                     MenuRow.Link("Мои треки") { showTracks() },
                     MenuRow.Link("Перейти к координатам") { gotoCoordinatesDialog() },
                     MenuRow.Link("Экспорт GPX") {
@@ -1100,10 +1159,9 @@ class MainActivity : AppCompatActivity() {
     /** The record button lives in the control capsule on the map; the menu setting shows or hides it. */
     private fun refreshRecButton() {
         val btn = findViewById<android.widget.ImageButton>(R.id.btnRec)
-        val on = prefs.getBoolean("rec_button", true)
         val rec = TrackService.running
-        btn.visibility = if (on) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.recDivider).visibility = if (on) View.VISIBLE else View.GONE
+        btn.visibility = View.VISIBLE
+        findViewById<View>(R.id.recDivider).visibility = View.VISIBLE
         btn.setImageResource(if (rec) R.drawable.ic_stop else R.drawable.ic_record)
         btn.setBackgroundResource(if (rec) R.drawable.bg_rec_active else R.drawable.bg_icon_btn)
         btn.contentDescription = if (rec) "Остановить запись трека" else "Начать запись трека"
