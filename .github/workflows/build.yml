@@ -71,10 +71,11 @@ jobs:
         id: need
         run: |
           mkdir -p app/src/main/assets
-          [ -s app/src/main/assets/georgia.mbtiles ] || echo "tiles=true" >> "$GITHUB_OUTPUT"
+          # A restored partial cache is not an exact match. Never package tiles built by older tooling.
+          [ "${{ steps.cache_tiles.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/georgia.mbtiles ] || echo "tiles=true" >> "$GITHUB_OUTPUT"
           # places.db is exact-key cached: a miss (tool changed) or missing tiles means rebuild
           [ "${{ steps.cache_places.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
-          [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
+          [ "${{ steps.cache_relief.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           [ "${{ steps.cache_contours.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/contours.mbtiles ] || echo "contours=true" >> "$GITHUB_OUTPUT"
           [ "${{ steps.cache_routing.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/routing.bin ] || echo "routing=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
