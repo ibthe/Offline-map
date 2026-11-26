@@ -2077,6 +2077,11 @@ class MainActivity : AppCompatActivity() {
         src("ovl-route")?.setGeoJson(Geo.lineFc(emptyList()))
         src("ovl-dest")?.setGeoJson(Geo.pointFc(listOf(ll)))
         navMode = NavMode.PLACE
+        if (etSearch.text?.isNotEmpty() == true) {
+            etSearch.setText("")
+            etSearch.clearFocus()
+        }
+        showResults(false)
         updateNavUi()
         if (pendingFrom != null) planRoute()
     }
