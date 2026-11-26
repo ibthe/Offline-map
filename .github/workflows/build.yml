@@ -166,6 +166,9 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
+      - name: Run unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Build APK
         run: gradle --no-daemon -Pvcode=${{ github.run_number }} :app:assembleDebug
 
