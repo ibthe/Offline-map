@@ -30,6 +30,15 @@ class NavSession(val route: RouteResult, val profile: Int) {
     val offRouteLimitM get() = if (profile == Profile.CAR) 60.0 else 35.0
 
     fun update(lat: Double, lon: Double): NavProgress {
+        // A degenerate route can contain a single coordinate. There is no segment
+        // to project onto, so treat that coordinate as the destination.
+        if (n == 1) {
+            val d = hypot(
+                (route.lon(0) - lon) * 111320.0 * cos(Math.toRadians((route.lat(0) + lat) / 2)),
+                (route.lat(0) - lat) * 110574.0
+            )
+            return NavProgress(0.0, 0.0, d, 0, 0.0, 0.0, d <= arriveRadiusM)
+        }
         var bestD = Double.MAX_VALUE
         var bestSeg = seg
         var bestT = 0.0
