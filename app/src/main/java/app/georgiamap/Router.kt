@@ -300,17 +300,40 @@ class RoadGraph(buf: ByteBuffer) {
 
     @Synchronized
     fun route(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int): RouteResult? {
+        if (p !in Profile.CAR..Profile.BIKE) return null
+        if (!fromLat.isFinite() || !fromLon.isFinite() || !toLat.isFinite() || !toLon.isFinite()) return null
+        if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 ||
+            fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) return null
+        if (distM(fromLat, fromLon, toLat, toLon) < 0.5) return null
+
         val ss = snapK(fromLat, fromLon, p, 4)
         val ts = snapK(toLat, toLon, p, 4)
         if (ss.isEmpty() || ts.isEmpty()) return null
+
         val pairs = ArrayList<Pair<Snap, Snap>>()
         for (a in ss) for (b in ts) pairs.add(a to b)
         pairs.sortBy { it.first.dist + it.second.dist }
-        for ((s, t) in pairs.take(8)) {
-            val r = search(fromLat, fromLon, toLat, toLon, p, s, t)
-            if (r != null) return r
+
+        // Evaluate every candidate pair. The closest pair of roads is not necessarily
+        // connected, nor does it necessarily produce the fastest complete route.
+        // Include the off-road connectors in the score because RouteResult.timeS only
+        // accounts for travel along the road graph.
+        val connectorSpeed = when (p) {
+            Profile.CAR -> 36.0
+            Profile.FOOT -> 1.5
+            else -> 8.0
         }
-        return null
+        var best: RouteResult? = null
+        var bestCost = Double.MAX_VALUE
+        for ((s, t) in pairs) {
+            val candidate = search(fromLat, fromLon, toLat, toLon, p, s, t) ?: continue
+            val cost = candidate.timeS + (candidate.startOffM + candidate.endOffM) / connectorSpeed
+            if (cost < bestCost) {
+                best = candidate
+                bestCost = cost
+            }
+        }
+        return best
     }
 
     private fun search(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap): RouteResult? {
