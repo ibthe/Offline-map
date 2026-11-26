@@ -63,9 +63,9 @@ object MenuUi {
 
         // ---- quick tiles: 3 per row, equal width, 8 dp gaps
         val tileGrid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        tiles.chunked(3).forEachIndexed { rowIdx, chunk ->
+        tiles.chunked(2).forEachIndexed { rowIdx, chunk ->
             val tileRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            for (i in 0 until 3) {
+            for (i in 0 until 2) {
                 val t = chunk.getOrNull(i)
                 val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) }
                 if (t == null) { tileRow.addView(View(ctx), lp); continue }
