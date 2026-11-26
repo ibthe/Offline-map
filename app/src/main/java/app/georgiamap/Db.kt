@@ -6,7 +6,6 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
-import org.maplibre.android.geometry.LatLng
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
@@ -14,20 +13,27 @@ import kotlin.math.ln
 import kotlin.math.tan
 
 /** Waypoints and recorded tracks (private, on-device). */
-class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 1) {
+class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
 
-    data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double)
-    data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long)
+    data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double, val ts: Long = 0L)
+    data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long, val segment: Int = 0)
     data class Track(val id: Long, val name: String, val start: Long, val count: Int)
+    data class ImportTrack(val name: String, val points: List<Pt>)
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer)")
         db.execSQL("create table tracks(id integer primary key autoincrement, name text, start integer)")
-        db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real)")
+        db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real, segment integer not null default 0)")
         db.execSQL("create index tp_idx on track_points(track_id)")
+        db.execSQL("create index tp_segment_idx on track_points(track_id,segment,id)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("alter table track_points add column segment integer not null default 0")
+            db.execSQL("create index if not exists tp_segment_idx on track_points(track_id,segment,id)")
+        }
+    }
 
     fun addWaypoint(name: String, lat: Double, lon: Double): Long {
         val v = ContentValues()
@@ -35,10 +41,14 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 1) {
         return writableDatabase.insert("waypoints", null, v)
     }
 
+    fun waypointCount(): Int = readableDatabase.rawQuery("select count(*) from waypoints", null).use {
+        if (it.moveToFirst()) it.getInt(0) else 0
+    }
+
     fun waypoints(): List<Wpt> {
         val out = ArrayList<Wpt>()
-        readableDatabase.rawQuery("select id,name,lat,lon from waypoints order by id", null).use { c ->
-            while (c.moveToNext()) out.add(Wpt(c.getLong(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3)))
+        readableDatabase.rawQuery("select id,name,lat,lon,ts from waypoints order by id", null).use { c ->
+            while (c.moveToNext()) out.add(Wpt(c.getLong(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3), c.getLong(4)))
         }
         return out
     }
@@ -57,23 +67,8 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 1) {
         val v = ContentValues()
         v.put("track_id", trackId); v.put("ts", ts); v.put("lat", lat); v.put("lon", lon)
         if (!ele.isNaN()) v.put("ele", ele)
+        v.put("segment", 0)
         writableDatabase.insert("track_points", null, v)
-    }
-
-    fun addPoints(trackId: Long, pts: List<Pt>) {
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            for (p in pts) {
-                val v = ContentValues()
-                v.put("track_id", trackId); v.put("ts", p.ts); v.put("lat", p.lat); v.put("lon", p.lon)
-                if (!p.ele.isNaN()) v.put("ele", p.ele)
-                db.insert("track_points", null, v)
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
     }
 
     fun tracks(): List<Track> {
@@ -90,21 +85,61 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 1) {
     fun trackPoints(id: Long): List<Pt> {
         val out = ArrayList<Pt>()
         readableDatabase.rawQuery(
-            "select lat,lon,ele,ts from track_points where track_id=? order by id", arrayOf(id.toString())
+            "select lat,lon,ele,ts,segment from track_points where track_id=? order by segment,id", arrayOf(id.toString())
         ).use { c ->
             while (c.moveToNext()) {
-                out.add(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3)))
+                out.add(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3), c.getInt(4)))
             }
         }
         return out
     }
 
-    fun trackLatLng(id: Long): List<LatLng> = trackPoints(id).map { LatLng(it.lat, it.lon) }
+    fun trackSegments(id: Long): List<List<Pt>> =
+        trackPoints(id).groupBy { it.segment }.toSortedMap().values.toList()
+
+    /** Import all parsed GPX data atomically so malformed files never leave half-imported records. */
+    fun importGpx(waypoints: List<Wpt>, importedTracks: List<ImportTrack>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (w in waypoints) {
+                val v = ContentValues().apply {
+                    put("name", w.name); put("lat", w.lat); put("lon", w.lon)
+                    put("ts", w.ts.takeIf { it > 0L } ?: System.currentTimeMillis())
+                }
+                db.insertOrThrow("waypoints", null, v)
+            }
+            for (track in importedTracks) {
+                val tv = ContentValues().apply {
+                    put("name", track.name)
+                    put("start", track.points.map { it.ts }.filter { it > 0L }.minOrNull() ?: System.currentTimeMillis())
+                }
+                val id = db.insertOrThrow("tracks", null, tv)
+                for (p in track.points) {
+                    val pv = ContentValues().apply {
+                        put("track_id", id); put("ts", p.ts); put("lat", p.lat); put("lon", p.lon)
+                        put("segment", p.segment)
+                        if (!p.ele.isNaN()) put("ele", p.ele)
+                    }
+                    db.insertOrThrow("track_points", null, pv)
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
 
     fun deleteTrack(id: Long) {
         val db = writableDatabase
-        db.delete("track_points", "track_id=?", arrayOf(id.toString()))
-        db.delete("tracks", "id=?", arrayOf(id.toString()))
+        db.beginTransaction()
+        try {
+            db.delete("track_points", "track_id=?", arrayOf(id.toString()))
+            db.delete("tracks", "id=?", arrayOf(id.toString()))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 }
 
@@ -115,8 +150,10 @@ class PlaceDb(path: String) {
 
     private val db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
 
+    @Synchronized
     fun count(): Int = db.rawQuery("select count(*) from places", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
+    @Synchronized
     fun search(query: String, limit: Int = 40): List<Place> {
         val q = query.trim().lowercase().replace("ё", "е").replace("%", "").replace("_", "")
         if (q.isEmpty()) return emptyList()
@@ -133,6 +170,9 @@ class PlaceDb(path: String) {
         }
         return out
     }
+
+    @Synchronized
+    fun close() = db.close()
 }
 
 /** Reads ground elevation from the Terrarium tiles bundled in relief.mbtiles. */
@@ -141,6 +181,7 @@ class Elevation(path: String, private val z: Int = 11) {
     private var cacheKey = ""
     private var cacheBmp: Bitmap? = null
 
+    @Synchronized
     fun at(lat: Double, lon: Double): Int? {
         if (lat < -85 || lat > 85) return null
         val n = 1 shl z
@@ -172,5 +213,12 @@ class Elevation(path: String, private val z: Int = 11) {
         val gg = (p shr 8) and 0xFF
         val bb = p and 0xFF
         return Math.round((rr * 256 + gg + bb / 256.0) - 32768.0).toInt()
+    }
+
+    @Synchronized
+    fun close() {
+        cacheBmp?.recycle()
+        cacheBmp = null
+        db.close()
     }
 }

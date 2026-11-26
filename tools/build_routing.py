@@ -159,7 +159,8 @@ def main(src, out):
                         geoms.append(g)
                 start = i
 
-    # drop tiny disconnected fragments (parking aisles cut by the extract, etc.)
+    # Remove only likely one-edge parking/driveway fragments. The previous >=8-edge
+    # threshold also discarded real short streets, named access roads and hiking paths.
     parent = list(range(len(node_lat)))
 
     def find(x):
@@ -172,9 +173,14 @@ def main(src, out):
         ra, rb_ = find(a), find(b)
         if ra != rb_:
             parent[ra] = rb_
-    ec = Counter(find(a) for a in eA)
-    keep = [i for i in range(len(eA)) if ec[find(eA[i])] >= 8]
-    print(f"edges: {len(eA)} -> kept {len(keep)} after removing tiny islands")
+    roots = [find(a) for a in eA]
+    ec = Counter(roots)
+    named_components = {roots[i] for i, name in enumerate(eName) if name != 0}
+    keep = [
+        i for i, root in enumerate(roots)
+        if ec[root] >= 2 or root in named_components or ((eFlags[i] >> 14) & 0xF) in (7, 8, 9)
+    ]
+    print(f"edges: {len(eA)} -> kept {len(keep)} after filtering isolated unnamed minor fragments")
     used = sorted({eA[i] for i in keep} | {eB[i] for i in keep})
     remap = {old: new for new, old in enumerate(used)}
     nlat = np.array([node_lat[o] for o in used], dtype="<i4")

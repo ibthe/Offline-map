@@ -38,6 +38,14 @@ object Geo {
         return FeatureCollection.fromFeatures(fs)
     }
 
+    /** Multiple independent line strings; used for GPX tracks with separate segments. */
+    fun linesFc(lines: List<List<LatLng>>): FeatureCollection {
+        val features = lines.filter { it.size >= 2 }.map { line ->
+            Feature.fromGeometry(LineString.fromLngLats(line.map { Point.fromLngLat(it.longitude, it.latitude) }))
+        }
+        return FeatureCollection.fromFeatures(features)
+    }
+
     /** Accepts "41.7151, 44.8271", "41.7151 44.8271", "41.7151;44.8271". */
     fun parseCoord(text: String): LatLng? {
         val nums = Regex("-?\\d+(?:[.,]\\d+)?").findAll(text.replace(';', ' '))

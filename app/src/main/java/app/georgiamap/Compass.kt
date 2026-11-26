@@ -190,8 +190,8 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
     interface Host {
         fun origin(): Origin?
         fun mapCenter(): Target?
-        fun searchPlaces(q: String): List<Target>
-        fun waypoints(): List<Target>
+        fun searchPlaces(q: String, callback: (List<Target>) -> Unit)
+        fun waypoints(callback: (List<Target>) -> Unit)
         fun navTarget(): Target?
         fun setMapBearing(deg: Double)
         fun toast(msg: String)
@@ -203,6 +203,7 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
     private val mag: Sensor? = sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
     private var registered = false
     private var sheetOpen = false
+    private var sheetGeneration = 0
     private var mapFollow = false
     private var mode = Mode.NORTH
     private var point: Target? = null
@@ -473,8 +474,11 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.setBackgroundResource(R.drawable.bg_sheet)
         dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
         dialog.behavior.skipCollapsed = true
+        sheetGeneration++
         dialog.setOnDismissListener {
-            sheetOpen = false; view = null; mainGroup = null; calibGroup = null
+            sheetOpen = false
+            sheetGeneration++
+            view = null; mainGroup = null; calibGroup = null
             tvCalibStatus = null; tvCalibField = null; btnCalibDone = null; calibrating = false
             updateSensors()
         }
@@ -490,8 +494,11 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         val actions = ArrayList<() -> Unit>()
         items.add("Найти населённый пункт или место"); actions.add { searchDialog() }
         items.add("Из моих точек"); actions.add {
-            val list = host.waypoints()
-            if (list.isEmpty()) host.toast("Сохранённых точек нет") else choose("Мои точки", list)
+            val generation = sheetGeneration
+            host.waypoints { list ->
+                if (!sheetOpen || generation != sheetGeneration) return@waypoints
+                if (list.isEmpty()) host.toast("Сохранённых точек нет") else choose("Мои точки", list)
+            }
         }
         host.navTarget()?.let { t -> items.add("Цель навигатора: ${t.name}"); actions.add { setPoint(t) } }
         items.add("Центр карты"); actions.add { host.mapCenter()?.let { setPoint(Target("Центр карты", it.lat, it.lon)) } }
@@ -514,8 +521,15 @@ class CompassController(private val act: AppCompatActivity, private val host: Ho
         MaterialAlertDialogBuilder(act).setTitle("Название").setView(et)
             .setPositiveButton("Найти") { _, _ ->
                 val q = et.text.toString().trim()
-                val res = if (q.length >= 2) host.searchPlaces(q) else emptyList()
-                if (res.isEmpty()) host.toast("Ничего не найдено") else choose("Найдено", res)
+                if (q.length < 2) {
+                    host.toast("Введите не менее двух символов")
+                } else {
+                    val generation = sheetGeneration
+                    host.searchPlaces(q) { res ->
+                        if (!sheetOpen || generation != sheetGeneration) return@searchPlaces
+                        if (res.isEmpty()) host.toast("Ничего не найдено") else choose("Найдено", res)
+                    }
+                }
             }.setNegativeButton("Отмена", null).show()
     }
 

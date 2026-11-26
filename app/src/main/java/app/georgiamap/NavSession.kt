@@ -17,6 +17,9 @@ class NavSession(val route: RouteResult, val profile: Int) {
     private var seg = 0
 
     init {
+        require(n > 0) { "A navigation route must contain at least one point" }
+        require(route.steps.isNotEmpty()) { "A navigation route must contain at least one step" }
+        require(route.steps.all { it.pointIndex in 0 until n }) { "Route step points must reference route geometry" }
         for (i in 1 until n) cum[i] = cum[i - 1] + hypot(
             (route.lon(i) - route.lon(i - 1)) * 111320.0 * cos(Math.toRadians((route.lat(i) + route.lat(i - 1)) / 2)),
             (route.lat(i) - route.lat(i - 1)) * 110574.0
@@ -30,6 +33,15 @@ class NavSession(val route: RouteResult, val profile: Int) {
     val offRouteLimitM get() = if (profile == Profile.CAR) 60.0 else 35.0
 
     fun update(lat: Double, lon: Double): NavProgress {
+        // A degenerate route can contain a single coordinate. There is no segment
+        // to project onto, so treat that coordinate as the destination.
+        if (n == 1) {
+            val d = hypot(
+                (route.lon(0) - lon) * 111320.0 * cos(Math.toRadians((route.lat(0) + lat) / 2)),
+                (route.lat(0) - lat) * 110574.0
+            )
+            return NavProgress(0.0, d, d, 0, d, d / avgSpeed, d <= arriveRadiusM)
+        }
         var bestD = Double.MAX_VALUE
         var bestSeg = seg
         var bestT = 0.0
@@ -57,8 +69,18 @@ class NavSession(val route: RouteResult, val profile: Int) {
         for (i in 1 until route.steps.size) {
             if (cum[route.steps[i].pointIndex] > along + 3.0) { k = i; break }
         }
-        val toStep = max(0.0, cum[route.steps[k].pointIndex] - along)
-        val arrived = remaining <= arriveRadiusM
-        return NavProgress(along, remaining, bestD, k, toStep, remaining / avgSpeed, arrived)
+        var toStep = max(0.0, cum[route.steps[k].pointIndex] - along)
+        val destinationDistance = hypot(
+            (route.lon(n - 1) - lon) * kx,
+            (route.lat(n - 1) - lat) * 110574.0
+        )
+        val arrived = destinationDistance <= arriveRadiusM
+        val remainingForUi = when {
+            arrived -> 0.0
+            remaining <= arriveRadiusM -> destinationDistance
+            else -> remaining
+        }
+        if (!arrived && remaining <= arriveRadiusM) toStep = destinationDistance
+        return NavProgress(along, remainingForUi, bestD, k, toStep, remainingForUi / avgSpeed, arrived)
     }
 }

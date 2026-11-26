@@ -160,6 +160,13 @@ class RoadGraph(buf: ByteBuffer) {
         return max(1.0, kmh) / 3.6
     }
 
+    /** Approximate speed for the straight connector between the requested point and the road graph. */
+    private fun connectorSpeedMs(p: Int) = when (p) {
+        Profile.CAR -> 36.0
+        Profile.FOOT -> 1.5
+        else -> 8.0
+    }
+
     fun nameOf(e: Int): String {
         val i = eName[e]
         if (i <= 0) return ""
@@ -300,17 +307,36 @@ class RoadGraph(buf: ByteBuffer) {
 
     @Synchronized
     fun route(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int): RouteResult? {
+        if (p !in Profile.CAR..Profile.BIKE) return null
+        if (!fromLat.isFinite() || !fromLon.isFinite() || !toLat.isFinite() || !toLon.isFinite()) return null
+        if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 ||
+            fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) return null
+        if (distM(fromLat, fromLon, toLat, toLon) < 0.5) return null
+
         val ss = snapK(fromLat, fromLon, p, 4)
         val ts = snapK(toLat, toLon, p, 4)
         if (ss.isEmpty() || ts.isEmpty()) return null
+
         val pairs = ArrayList<Pair<Snap, Snap>>()
         for (a in ss) for (b in ts) pairs.add(a to b)
         pairs.sortBy { it.first.dist + it.second.dist }
-        for ((s, t) in pairs.take(8)) {
-            val r = search(fromLat, fromLon, toLat, toLon, p, s, t)
-            if (r != null) return r
+
+        // Evaluate every candidate pair. The closest pair of roads is not necessarily
+        // connected, nor does it necessarily produce the fastest complete route.
+        // RouteResult.timeS includes an estimate for the straight off-road connectors.
+        var best: RouteResult? = null
+        var bestCost = Double.MAX_VALUE
+        for ((s, t) in pairs) {
+            // Connector time alone is a lower bound; skip pairs that cannot beat the best route.
+            if ((s.dist + t.dist) / connectorSpeedMs(p) >= bestCost) continue
+            val candidate = search(fromLat, fromLon, toLat, toLon, p, s, t) ?: continue
+            val cost = candidate.timeS
+            if (cost < bestCost) {
+                best = candidate
+                bestCost = cost
+            }
         }
-        return null
+        return best
     }
 
     private fun search(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap): RouteResult? {
@@ -448,6 +474,7 @@ class RoadGraph(buf: ByteBuffer) {
         for (i in 1 until pts.n) dist += distM(points[2 * i - 2], points[2 * i - 1], points[2 * i], points[2 * i + 1])
         var time = 0.0
         for (l in legs) time += l.lenM / speedMs(l.e, p)
+        time += (s.dist + t.dist) / connectorSpeedMs(p)
         legs.last().i1 = pts.n - 1
         val real = legs.filter { it.lenM >= 2.0 }
         return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist), s.dist, t.dist)

@@ -3,6 +3,8 @@ name: Build APK
 on:
   push:
     branches: [main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       osm_url:
@@ -26,62 +28,137 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Tiles (30-60 min) are cached on the OSM/tile tools only. The search index and relief have their own
-      # exact-key caches: changing build_places.py rebuilds just places.db (fast) from the cached tiles.
-      # (Before, restore-keys silently restored an OLD places.db, so edits to the index never applied.)
+      - name: Resolve pinned Planetiler release
+        id: planetiler
+        run: |
+          version=$(curl -fsSL --retry 3 https://api.github.com/repos/onthegomap/planetiler/releases/latest | python -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Fingerprint the requested OSM source
+        id: source
+        env:
+          OSM_URL: ${{ github.event.inputs.osm_url }}
+        run: |
+          mkdir -p data
+          echo "osm_fingerprint=$(printf '%s' "$OSM_URL" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache source OSM extract
+        id: cache_osm
+        uses: actions/cache@v4
+        with:
+          path: data/georgia.osm.pbf
+          key: osm-v1-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py') }}
+
+      # Reuse only exact, validated assets. Bump tools/osm_data_revision.txt or tools/terrain_data_revision.txt when intentionally refreshing
+      # the corresponding upstream data snapshot. An explicit osm_url also gets its own cache namespace.
       - name: Cache tiles
         id: cache_tiles
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/georgia.mbtiles
-          key: tiles-v1-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
-          restore-keys: |
-            tiles-v1-
+          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
 
       - name: Cache search index
         id: cache_places
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/places.db
-          key: places-v1-${{ hashFiles('tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
+          key: places-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
 
       - name: Cache relief
         id: cache_relief
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/relief.mbtiles
-          key: relief-v1-${{ hashFiles('tools/build_relief.py') }}
+          key: relief-v2-${{ hashFiles('tools/terrain_data_revision.txt', 'tools/build_relief.py') }}
 
       - name: Cache contour lines
         id: cache_contours
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/contours.mbtiles
-          key: contours-v1-${{ hashFiles('tools/build_contours.py') }}
+          key: contours-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}
 
       - name: Cache road graph (navigator)
         id: cache_routing
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/routing.bin
-          key: routing-v1-${{ hashFiles('tools/build_routing.py', 'tools/fetch_osm.py') }}
+          key: routing-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_routing.py', 'tools/fetch_osm.py') }}
 
-      # decided once, before anything is built (a file check per step would change mid-run)
+      # Validate each cache independently. Only rebuild dependent assets when their input changed.
       - name: Decide what has to be rebuilt
         id: need
         run: |
           mkdir -p app/src/main/assets
-          [ -s app/src/main/assets/georgia.mbtiles ] || echo "tiles=true" >> "$GITHUB_OUTPUT"
-          # places.db is exact-key cached: a miss (tool changed) or missing tiles means rebuild
-          [ "${{ steps.cache_places.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
-          [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
-          [ "${{ steps.cache_contours.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/contours.mbtiles ] || echo "contours=true" >> "$GITHUB_OUTPUT"
-          [ "${{ steps.cache_routing.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/routing.bin ] || echo "routing=true" >> "$GITHUB_OUTPUT"
+
+          tiles_ok=false
+          places_ok=false
+          relief_ok=false
+          contours_ok=false
+          routing_ok=false
+          osm_ok=false
+
+          if [ "${{ steps.cache_osm.outputs.cache-hit }}" = "true" ] &&
+             python tools/check_cached_assets.py osm data/georgia.osm.pbf; then
+            osm_ok=true
+          fi
+          if [ "${{ steps.cache_tiles.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/georgia.mbtiles ] &&
+             python tools/check_tiles.py app/src/main/assets/georgia.mbtiles >/dev/null; then
+            tiles_ok=true
+          fi
+          if [ "${{ steps.cache_places.outputs.cache-hit }}" = "true" ] &&
+             python tools/check_cached_assets.py places app/src/main/assets/places.db; then
+            places_ok=true
+          fi
+          if [ "${{ steps.cache_relief.outputs.cache-hit }}" = "true" ] &&
+             python tools/check_cached_assets.py relief app/src/main/assets/relief.mbtiles; then
+            relief_ok=true
+          fi
+          if [ "${{ steps.cache_contours.outputs.cache-hit }}" = "true" ] &&
+             python tools/check_cached_assets.py contours app/src/main/assets/contours.mbtiles; then
+            contours_ok=true
+          fi
+          if [ "${{ steps.cache_routing.outputs.cache-hit }}" = "true" ] &&
+             python tools/check_cached_assets.py routing app/src/main/assets/routing.bin; then
+            routing_ok=true
+          fi
+
+          need_tiles=false
+          need_places=false
+          need_relief=false
+          need_contours=false
+          need_routing=false
+          need_osm=false
+
+          [ "$tiles_ok" = true ] || { need_tiles=true; need_places=true; need_contours=true; }
+          [ "$places_ok" = true ] || need_places=true
+          [ "$relief_ok" = true ] || { need_relief=true; need_contours=true; }
+          [ "$contours_ok" = true ] || need_contours=true
+          [ "$routing_ok" = true ] || need_routing=true
+
+          # If the exact source PBF was evicted or invalid, rebuild every OSM-derived asset from
+          # one newly downloaded extract so the tiles, search index and routing graph stay aligned.
+          if [ "$osm_ok" != true ] && { [ "$need_tiles" = true ] || [ "$need_routing" = true ]; }; then
+            need_osm=true
+            need_tiles=true
+            need_routing=true
+            need_places=true
+            need_contours=true
+          fi
+
+          if [ "$need_tiles" = true ]; then echo "tiles=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$need_places" = true ]; then echo "places=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$need_relief" = true ]; then echo "relief=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$need_contours" = true ]; then echo "contours=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$need_routing" = true ]; then echo "routing=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$need_osm" = true ]; then echo "osm=true" >> "$GITHUB_OUTPUT"; fi
+
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
 
       - name: Download OSM extract of Georgia (Geofabrik)
-        if: steps.need.outputs.tiles == 'true' || steps.need.outputs.routing == 'true'
+        if: steps.need.outputs.osm == 'true'
         env:
           OSM_URL: ${{ github.event.inputs.osm_url }}
         run: |
@@ -93,7 +170,7 @@ jobs:
         if: steps.need.outputs.tiles == 'true'
         run: |
           curl -L --fail --retry 3 -o data/planetiler.jar \
-            https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
+            https://github.com/onthegomap/planetiler/releases/download/${{ steps.planetiler.outputs.version }}/planetiler.jar
           mkdir -p app/src/main/assets
           java -Xmx4g -jar data/planetiler.jar \
             --osm-path=data/georgia.osm.pbf \
@@ -120,6 +197,7 @@ jobs:
         if: steps.need.outputs.routing == 'true'
         continue-on-error: true
         run: |
+          rm -f app/src/main/assets/routing.bin
           python -m pip install --quiet osmium numpy
           python tools/build_routing.py data/georgia.osm.pbf app/src/main/assets/routing.bin
           ls -lh app/src/main/assets/routing.bin
@@ -128,7 +206,9 @@ jobs:
         if: steps.need.outputs.relief == 'true'
         continue-on-error: true
         working-directory: tools
-        run: python build_relief.py ../app/src/main/assets/relief.mbtiles
+        run: |
+          rm -f ../app/src/main/assets/relief.mbtiles
+          python build_relief.py ../app/src/main/assets/relief.mbtiles
 
       # Elevation lines (горизонтали) for the "Высоты" layer. Heights come from relief.mbtiles (z<=11) and a one-time
       # download of the z12 terrain tiles; only tiles that exist in georgia.mbtiles are built. Optional: without the
@@ -138,12 +218,29 @@ jobs:
         continue-on-error: true
         working-directory: tools
         run: |
+          rm -f ../app/src/main/assets/contours.mbtiles
           python -m pip install --quiet numpy scipy pillow contourpy
           python build_contours.py ../app/src/main/assets/contours.mbtiles \
             --relief ../app/src/main/assets/relief.mbtiles \
             --like ../app/src/main/assets/georgia.mbtiles \
             --cache "$RUNNER_TEMP/dem-cache.sqlite"
           ls -lh ../app/src/main/assets/contours.mbtiles
+
+      - name: Validate generated assets before packaging
+        run: |
+          python tools/check_tiles.py app/src/main/assets/georgia.mbtiles
+          python tools/check_cached_assets.py places app/src/main/assets/places.db
+          for kind in relief contours routing; do
+            case "$kind" in
+              relief) path=app/src/main/assets/relief.mbtiles ;;
+              contours) path=app/src/main/assets/contours.mbtiles ;;
+              routing) path=app/src/main/assets/routing.bin ;;
+            esac
+            if [ -s "$path" ] && ! python tools/check_cached_assets.py "$kind" "$path"; then
+              echo "::warning::$kind asset failed validation and will be omitted from this APK"
+              rm -f "$path"
+            fi
+          done
 
       - name: Build label fonts (Latin + Cyrillic + Georgian)
         run: |
@@ -161,12 +258,42 @@ jobs:
             python tools/gen_style.py app/src/main/assets/style_${P}_dark.json --dark --palette=$P
           done
 
+      - name: Write per-asset content manifest
+        run: |
+          cd app/src/main/assets
+          : > map-data-manifest.txt
+          for name in georgia.mbtiles places.db relief.mbtiles contours.mbtiles routing.bin; do
+            if [ -s "$name" ]; then
+              hash=$(sha256sum "$name" | cut -d' ' -f1)
+              printf "%s=%s\n" "$name" "$hash" >> map-data-manifest.txt
+            fi
+          done
+
+      - name: Compute bundled map data version
+        id: data
+        env:
+          OSM_FINGERPRINT: ${{ steps.source.outputs.osm_fingerprint }}
+          PLANETILER_VERSION: ${{ steps.planetiler.outputs.version }}
+          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
+        run: |
+          echo "version=${PLANETILER_VERSION}-${OSM_FINGERPRINT}-${DATA_TOOLS}" >> "$GITHUB_OUTPUT"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
 
+      - name: Prepare synthetic routing graph for regression tests
+        run: |
+          python -m pip install --quiet osmium numpy
+          python tools/tests/make_test_osm.py "$RUNNER_TEMP/router-test.osm"
+          python tools/build_routing.py "$RUNNER_TEMP/router-test.osm" "$RUNNER_TEMP/router-test.bin"
+          echo "ROUTER_TEST_GRAPH=$RUNNER_TEMP/router-test.bin" >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        run: gradle --no-daemon -ProuterTestGraph="$ROUTER_TEST_GRAPH" :app:testDebugUnitTest
+
       - name: Build APK
-        run: gradle --no-daemon -Pvcode=${{ github.run_number }} :app:assembleDebug
+        run: gradle --no-daemon -Pvcode=${{ github.run_number }} -PmapDataVersion=${{ steps.data.outputs.version }} :app:assembleDebug
 
       - uses: actions/upload-artifact@v4
         with:

@@ -146,6 +146,7 @@
             android:src="@drawable/ic_fit" />
 
         <View
+            android:id="@+id/fitDivider"
             android:layout_width="@dimen/space_5"
             android:layout_height="1dp"
             android:layout_gravity="center_horizontal"
