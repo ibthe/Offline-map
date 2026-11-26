@@ -1,0 +1,7 @@
+<resources>
+    <!-- dark icons on the (light) navigation bar; in night mode @bool/light_bars is false -->
+    <style name="Theme.GeorgiaMap" parent="Base.Theme.GeorgiaMap">
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowLightNavigationBar">@bool/light_bars</item>
+    </style>
+</resources>

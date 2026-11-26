@@ -1,0 +1,46 @@
+<resources>
+    <style name="Base.Theme.GeorgiaMap" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Ocean defaults; MainActivity applies the chosen ThemeOverlay.Georgia.* on top -->
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnPrimary">@color/on_accent</item>
+        <item name="colorPrimaryContainer">@color/accent_container</item>
+        <item name="colorOnPrimaryContainer">@color/on_accent_container</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorSurfaceContainer">@color/dialog_bg</item>
+        <item name="colorSurfaceContainerHigh">@color/dialog_bg</item>
+        <item name="android:windowBackground">@color/surface</item>
+
+        <item name="gmPanel">@color/panel</item>
+        <item name="gmPanelStroke">@color/panel_stroke</item>
+        <item name="gmFab">@color/fab_bg</item>
+        <item name="gmDialogBg">@color/dialog_bg</item>
+        <item name="gmTextPrimary">@color/text_primary</item>
+        <item name="gmTextSecondary">@color/text_secondary</item>
+        <item name="gmHint">@color/hint</item>
+        <item name="gmIconTint">@color/icon_tint</item>
+        <item name="gmDivider">@color/divider_soft</item>
+        <item name="gmAccent">@color/accent</item>
+        <item name="gmAccentEnd">@color/accent_end</item>
+        <item name="gmOnAccent">@color/on_accent</item>
+        <item name="gmAccentContainer">@color/accent_container</item>
+        <item name="gmOnAccentContainer">@color/on_accent_container</item>
+        <item name="gmCrosshair">@color/crosshair</item>
+        <item name="gmCrosshairHalo">@color/crosshair_halo</item>
+
+        <!-- type scale for every dialog / list the Material components draw -->
+        <item name="textAppearanceHeadlineSmall">@style/TextAppearance.Georgia.Headline</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.Georgia.Title</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.Georgia.Body</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.Georgia.BodySmall</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.Georgia.Label</item>
+
+        <!-- edge-to-edge: the map runs under transparent system bars -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+    </style>
+
+    <style name="Theme.GeorgiaMap" parent="Base.Theme.GeorgiaMap" />
+</resources>

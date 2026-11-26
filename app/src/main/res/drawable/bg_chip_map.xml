@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- category chip floating over the map: opaque panel colour, so it stays readable on any map style -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#22808080">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/gmPanel" />
+            <stroke android:width="@dimen/stroke_w" android:color="?attr/gmPanelStroke" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+</ripple>

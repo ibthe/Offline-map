@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- pin -->
+    <path android:fillColor="#FFFFFF" android:pathData="M54,22C41.8,22 32,31.6 32,43.5C32,59 54,86 54,86S76,59 76,43.5C76,31.6 66.2,22 54,22z" />
+    <path android:fillColor="#2A7FA8" android:pathData="M54,32.5m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0" />
+    <!-- Georgian-style cross in the pin -->
+    <path android:fillColor="#FFFFFF" android:pathData="M52,26h4v4.5h4.5v4h-4.5v4.5h-4v-4.5h-4.5v-4h4.5z" />
+</vector>
