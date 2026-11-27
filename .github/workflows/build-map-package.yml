@@ -18,6 +18,10 @@ on:
         required: true
         default: AM
         type: string
+      emergency_number:
+        description: "Verified local emergency number for this region (digits, optional leading +)"
+        required: true
+        type: string
       osm_url:
         description: "Direct URL to the region's .osm.pbf extract"
         required: true
@@ -128,6 +132,7 @@ jobs:
           PACKAGE_ID: ${{ inputs.package_id }}
           PACKAGE_TITLE: ${{ inputs.title }}
           COUNTRY_CODE: ${{ inputs.country_code }}
+          EMERGENCY_NUMBER: ${{ inputs.emergency_number }}
           SOUTH: ${{ inputs.south }}
           WEST: ${{ inputs.west }}
           NORTH: ${{ inputs.north }}
@@ -137,6 +142,7 @@ jobs:
             --id "$PACKAGE_ID" \
             --title "$PACKAGE_TITLE" \
             --country-code "$COUNTRY_CODE" \
+            --emergency-number "$EMERGENCY_NUMBER" \
             --bounds "$SOUTH" "$WEST" "$NORTH" "$EAST" \
             --tiles app/src/main/assets/tiles.mbtiles \
             --places app/src/main/assets/places.db \
