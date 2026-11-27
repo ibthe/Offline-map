@@ -4,7 +4,6 @@ import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -105,7 +104,7 @@ object RouteAnalysis {
 
         // Route samples are already spaced (normally 100 m), which reduces pixel noise
         // while retaining short steep sections that a broad median filter could erase.
-        val smooth = samples.map { s ->
+        val profileSamples = samples.map { s ->
             Sample(s.distanceM, s.elevationM?.takeIf { it.isFinite() })
         }
 
@@ -114,9 +113,9 @@ object RouteAnalysis {
         var maxUp = 0.0
         var maxDown = 0.0
         val grades = ArrayList<Triple<Double, Double, Double>>() // from, to, signed grade
-        for (i in 1 until smooth.size) {
-            val a = smooth[i - 1]
-            val b = smooth[i]
+        for (i in 1 until profileSamples.size) {
+            val a = profileSamples[i - 1]
+            val b = profileSamples[i]
             val horizontal = b.distanceM - a.distanceM
             val h0 = a.elevationM
             val h1 = b.elevationM
@@ -134,17 +133,17 @@ object RouteAnalysis {
         }
 
         val steep = ArrayList<SteepSection>()
-        var start = -1
-        var end = -1
+        var start = -1.0
+        var end = -1.0
         var gradeSum = 0.0
         var lengthSum = 0.0
         var uphill: Boolean? = null
         fun flush() {
             if (start >= 0 && lengthSum > 0.0 && uphill != null) {
-                steep.add(SteepSection(start.toDouble(), end.toDouble(), gradeSum / lengthSum, uphill!!))
+                steep.add(SteepSection(start, end, gradeSum / lengthSum, uphill!!))
             }
-            start = -1
-            end = -1
+            start = -1.0
+            end = -1.0
             gradeSum = 0.0
             lengthSum = 0.0
             uphill = null
@@ -156,8 +155,8 @@ object RouteAnalysis {
                 flush()
             }
             if (isSteep) {
-                if (start < 0) start = from.toInt()
-                end = to.toInt()
+                if (start < 0.0) start = from
+                end = to
                 val length = to - from
                 gradeSum += abs(grade) * length
                 lengthSum += length
@@ -175,7 +174,7 @@ object RouteAnalysis {
         }
         return Result(distanceM, valid.minOrNull(), valid.maxOrNull(), ascent, descent,
             maxUp.takeIf { it > 0.0 }, maxDown.takeIf { it > 0.0 }, coverage,
-            smooth, steep, difficulty)
+            profileSamples, steep, difficulty)
     }
 
     fun distance(a: Point, b: Point): Double {
