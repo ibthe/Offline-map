@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Builds relief.mbtiles (terrain tiles, Terrarium encoding) for Georgia from the public AWS Terrain Tiles
-dataset. Used for hillshading and for the elevation readout. Usage: build_relief.py <out.mbtiles>"""
+"""Builds Terrarium elevation MBTiles for a requested region from public AWS Terrain Tiles.
+Defaults to the Georgia bounds. Usage: build_relief.py <out.mbtiles> [--bbox W,S,E,N] [--maxzoom 11]"""
 import argparse
 import concurrent.futures as cf
 import math
