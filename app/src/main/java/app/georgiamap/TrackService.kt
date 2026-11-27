@@ -42,6 +42,59 @@ class TrackService : Service() {
     private var lastRecordedLocationTime = 0L
     private var currentSegment = 0
     private val segmentGapMs = 5 * 60 * 1000L
+    private var batteryReceiverRegistered = false
+    private var batteryLow = false
+
+    private val batteryReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_BATTERY_LOW -> {
+                    batteryLow = true
+                    updateRecordingNotification()
+                }
+                Intent.ACTION_BATTERY_OKAY -> {
+                    batteryLow = false
+                    updateRecordingNotification()
+                }
+            }
+        }
+    }
+
+    private fun buildRecordingNotification(): Notification {
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return NotificationCompat.Builder(this, CHANNEL)
+            .setContentTitle(if (batteryLow) "Низкий заряд · запись трека" else "Запись GPS-трека")
+            .setContentText(if (batteryLow) "Подключите питание: телефон может отключиться до сохранения экспедиции" else "Georgia Offline Map записывает маршрут")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setOngoing(true)
+            .setContentIntent(open)
+            .build()
+    }
+
+    private fun updateRecordingNotification() {
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(1, buildRecordingNotification())
+    }
+
+    private fun monitorBattery() {
+        if (batteryReceiverRegistered) return
+        val sticky = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = sticky?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = sticky?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+        batteryLow = level >= 0 && scale > 0 && level * 100 / scale <= 15
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_BATTERY_LOW)
+            addAction(Intent.ACTION_BATTERY_OKAY)
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, batteryReceiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        batteryReceiverRegistered = true
+        if (batteryLow) updateRecordingNotification()
+    }
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
@@ -101,17 +154,7 @@ class TrackService : Service() {
             val ch = NotificationChannel(CHANNEL, "Запись трека", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
         }
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val n: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("Запись GPS-трека")
-            .setContentText("Georgia Offline Map записывает маршрут")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setOngoing(true)
-            .setContentIntent(open)
-            .build()
+        val n: Notification = buildRecordingNotification()
         // startForegroundService() requires startForeground() even if we stop right away (else ANR/crash)
         try {
             ServiceCompat.startForeground(this, 1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
@@ -123,6 +166,7 @@ class TrackService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        monitorBattery()
 
         val manager = getSystemService(LOCATION_SERVICE) as LocationManager
         lm = manager
@@ -165,6 +209,10 @@ class TrackService : Service() {
     }
 
     override fun onDestroy() {
+        if (batteryReceiverRegistered) {
+            try { unregisterReceiver(batteryReceiver) } catch (_: Exception) { }
+            batteryReceiverRegistered = false
+        }
         try { lm?.removeUpdates(listener) } catch (_: Exception) { }
         activeProviders.clear()
         running = false
