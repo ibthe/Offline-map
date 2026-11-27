@@ -52,6 +52,7 @@ class TrackPauseDetectorTest {
             assertEquals(TrackPauseDetector.Event.RECORD,
                 detector.onFix(41.0, 44.0, 1_000L + i * 30_000L, 5.0))
         }
+        assertEquals(TrackPauseDetector.Event.SKIP, detector.onFix(41.0, 44.0, 2_000L, 5.0))
         assertTrue(!detector.isPaused)
     }
 
