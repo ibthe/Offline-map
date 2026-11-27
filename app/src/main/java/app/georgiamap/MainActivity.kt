@@ -2401,9 +2401,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun routeAvoidanceSummary(): String {
         val labels = ArrayList<String>()
-        if (routeAvoidance and RouteAvoidance.UNPAVED != 0) labels.add("грунтовки")
-        if (routeAvoidance and RouteAvoidance.STEPS != 0) labels.add("лестницы")
-        if (routeAvoidance and RouteAvoidance.DIFFICULT_TRAILS != 0) labels.add("сложные тропы")
+        if ((routeAvoidance and RouteAvoidance.UNPAVED) != 0) labels.add("грунтовки")
+        if ((routeAvoidance and RouteAvoidance.STEPS) != 0) labels.add("лестницы")
+        if ((routeAvoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0) labels.add("сложные тропы")
         return labels.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Без ограничений"
     }
 
@@ -2413,7 +2413,7 @@ class MainActivity : AppCompatActivity() {
         )
         val labels = arrayOf("Грунтовые и неасфальтированные дороги",
             "Лестницы и ступенчатые проходы", "Тропы с плохим состоянием или высоким tracktype")
-        val checked = BooleanArray(flags.size) { i -> routeAvoidance and flags[i] != 0 }
+        val checked = BooleanArray(flags.size) { i -> (routeAvoidance and flags[i]) != 0 }
         var selected = routeAvoidance
         MaterialAlertDialogBuilder(this)
             .setTitle("Избегать на маршруте")
