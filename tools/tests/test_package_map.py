@@ -42,8 +42,8 @@ class MapPackageBuilderTests(unittest.TestCase):
     def test_includes_optional_relief_and_contours_assets(self):
         relief = self.root / "relief.mbtiles"
         contours = self.root / "contours.mbtiles"
-        relief.write_bytes(b"SQLite format 3\\x00" + bytes(32))
-        contours.write_bytes(b"SQLite format 3\\x00" + bytes(32))
+        relief.write_bytes(b"SQLite format 3\x00" + bytes(32))
+        contours.write_bytes(b"SQLite format 3\x00" + bytes(32))
         output = create_package(self.args(relief=str(relief), contours=str(contours)))
         with zipfile.ZipFile(output) as archive:
             self.assertIn("relief.mbtiles", archive.namelist())
