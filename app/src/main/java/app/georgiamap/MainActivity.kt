@@ -2410,6 +2410,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.navMain).text = Geo.fmtDist(remM) + " · " + fmtDur(remS)
         val terrainStatus = when {
             routeAnalysisBusy -> " · анализ высот…"
+            routeAnalysisResult?.difficulty == RouteAnalysis.Difficulty.HARD -> " · ⚠ сложный рельеф · профиль ↗"
+            routeAnalysisResult?.difficulty == RouteAnalysis.Difficulty.MODERATE -> " · умеренный рельеф · профиль ↗"
             routeAnalysisResult?.hasElevation == true -> " · профиль высот ↗"
             routeAnalysisResult != null -> " · рельеф частично недоступен ↗"
             elevation == null -> " · нет данных рельефа ↗"
