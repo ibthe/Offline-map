@@ -103,9 +103,25 @@ jobs:
 
       - name: Build offline routing graph
         run: |
-          python -m pip install --quiet osmium numpy
+          python -m pip install --quiet osmium numpy scipy contourpy pillow
           python tools/build_routing.py data/region.osm.pbf app/src/main/assets/routing.bin
           python tools/check_cached_assets.py routing app/src/main/assets/routing.bin
+
+      - name: Build offline relief and contour lines
+        env:
+          WEST: ${{ inputs.west }}
+          SOUTH: ${{ inputs.south }}
+          EAST: ${{ inputs.east }}
+          NORTH: ${{ inputs.north }}
+        run: |
+          BBOX="$WEST,$SOUTH,$EAST,$NORTH"
+          python tools/build_relief.py app/src/main/assets/relief.mbtiles --bbox "$BBOX" --maxzoom 11
+          python tools/check_cached_assets.py relief app/src/main/assets/relief.mbtiles
+          python tools/build_contours.py app/src/main/assets/contours.mbtiles \
+            --relief app/src/main/assets/relief.mbtiles \
+            --like app/src/main/assets/tiles.mbtiles \
+            --bbox "$BBOX" --minzoom 8 --maxzoom 12
+          python tools/check_cached_assets.py contours app/src/main/assets/contours.mbtiles
 
       - name: Package regional map
         env:
@@ -124,6 +140,8 @@ jobs:
             --bounds "$SOUTH" "$WEST" "$NORTH" "$EAST" \
             --tiles app/src/main/assets/tiles.mbtiles \
             --places app/src/main/assets/places.db \
+            --relief app/src/main/assets/relief.mbtiles \
+            --contours app/src/main/assets/contours.mbtiles \
             --routing app/src/main/assets/routing.bin \
             --output "$RUNNER_TEMP/$PACKAGE_ID.gmap"
           ls -lh "$RUNNER_TEMP/$PACKAGE_ID.gmap"
