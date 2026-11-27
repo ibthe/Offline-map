@@ -2165,6 +2165,7 @@ class MainActivity : AppCompatActivity() {
                     out.append("<gpx version=\"1.1\" creator=\"Georgia Offline Map\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
                     for (w in userDb.waypoints()) {
                         out.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name>")
+                        if (w.note.isNotBlank()) out.append("<desc>${esc(w.note)}</desc>")
                         if (w.ts > 0L) out.append("<time>${iso.format(Date(w.ts))}</time>")
                         out.append("</wpt>\n")
                     }
@@ -2214,7 +2215,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } ?: error("Не удалось открыть GPX-файл")
                 val waypoints = parsed.waypoints.map {
-                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs)
+                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs, false, it.note)
                 }
                 val tracks = parsed.tracks.map { track ->
                     UserDb.ImportTrack(track.name, track.points.map { point ->
