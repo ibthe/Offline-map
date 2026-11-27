@@ -156,6 +156,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 6) {
                     put("name", w.name); put("lat", w.lat); put("lon", w.lon)
                     put("ts", w.ts.coerceAtLeast(0L))
                     put("note", w.note.take(2_000))
+                    put("category", w.category.take(100))
                 }
                 db.insertOrThrow("waypoints", null, v)
             }
