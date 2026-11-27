@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private var elevationGeneration = 0
     private var elevationTask: Runnable? = null
     private var waypointRenderGeneration = 0
+    private var waypointViewportTask: Runnable? = null
     private var trackRenderGeneration = 0
     private var listLoadGeneration = 0
     private var diagnosticsGeneration = 0
@@ -480,6 +481,8 @@ class MainActivity : AppCompatActivity() {
         diagnosticsGeneration++
         routeAnalysisGeneration++
         safetyLookupGeneration++
+        waypointViewportTask?.let { ui.removeCallbacks(it) }
+        waypointViewportTask = null
         searchTask?.let { ui.removeCallbacks(it) }
         elevationTask?.let { ui.removeCallbacks(it) }
         tts?.shutdown()
@@ -730,7 +733,7 @@ class MainActivity : AppCompatActivity() {
         if (following) myLoc?.let {
             m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), maxOf(m.cameraPosition.zoom, 14.0)))
         }
-        m.addOnCameraIdleListener { updateInfo() }
+        m.addOnCameraIdleListener { updateInfo(); scheduleWaypointViewportRender() }
         m.addOnCameraMoveStartedListener { reason ->
             if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                 following = false
@@ -1058,15 +1061,32 @@ class MainActivity : AppCompatActivity() {
     /** The saved point under the finger (within ~36 dp on screen), if any. */
     private fun nearestWaypoint(m: MapLibreMap, ll: LatLng): UserDb.Wpt? {
         val tap = m.projection.toScreenLocation(ll)
+        val radius = dp(36f).toFloat()
+        var latRadius = 90.0
+        var lonRadius = 180.0
+        try {
+            val corners = listOf(
+                android.graphics.Point(tap.x - radius.toInt(), tap.y - radius.toInt()),
+                android.graphics.Point(tap.x + radius.toInt(), tap.y - radius.toInt()),
+                android.graphics.Point(tap.x + radius.toInt(), tap.y + radius.toInt()),
+                android.graphics.Point(tap.x - radius.toInt(), tap.y + radius.toInt())
+            ).map { m.projection.fromScreenLocation(it) }
+            latRadius = corners.maxOf { kotlin.math.abs(it.latitude - ll.latitude) }
+            lonRadius = corners.maxOf { kotlin.math.abs(normalizeLonDelta(it.longitude - ll.longitude)) }
+        } catch (_: Exception) { }
         var best: UserDb.Wpt? = null
-        var bestD = dp(36f).toFloat()
+        var bestD = radius
         for (w in waypointCache) {
+            if (kotlin.math.abs(w.lat - ll.latitude) > latRadius ||
+                kotlin.math.abs(normalizeLonDelta(w.lon - ll.longitude)) > lonRadius) continue
             val q = m.projection.toScreenLocation(LatLng(w.lat, w.lon))
             val d = Math.hypot((q.x - tap.x).toDouble(), (q.y - tap.y).toDouble()).toFloat()
             if (d < bestD) { bestD = d; best = w }
         }
         return best
     }
+
+    private fun normalizeLonDelta(delta: Double): Double = ((delta + 540.0) % 360.0) - 180.0
 
     private fun themeColorInt(attr: Int): Int {
         val tv = TypedValue()
@@ -1080,12 +1100,65 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshWaypoints() {
         val generation = ++waypointRenderGeneration
-        thread(name = "waypoint-render") {
+        thread(name = "waypoint-cache-load") {
             val points = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
-            val geo = Geo.pointFc(points.map { LatLng(it.lat, it.lon) }, points.map { it.name })
             runOnUiThread {
                 if (generation == waypointRenderGeneration && !isFinishing && !isDestroyed) {
                     waypointCache = points
+                    scheduleWaypointViewportRender()
+                }
+            }
+        }
+    }
+
+    /** Debounced viewport rendering keeps large waypoint collections off the UI thread and out of one giant GeoJSON source. */
+    private fun scheduleWaypointViewportRender() {
+        waypointViewportTask?.let { ui.removeCallbacks(it) }
+        val task = Runnable {
+            waypointViewportTask = null
+            renderWaypointsForViewport()
+        }
+        waypointViewportTask = task
+        ui.postDelayed(task, 140L)
+    }
+
+    private fun renderWaypointsForViewport() {
+        val m = map ?: return
+        if (mapView.width <= 0 || mapView.height <= 0 || style == null) return
+        val center = m.cameraPosition.target
+        val corners = try {
+            listOf(
+                android.graphics.Point(0, 0),
+                android.graphics.Point(mapView.width, 0),
+                android.graphics.Point(mapView.width, mapView.height),
+                android.graphics.Point(0, mapView.height)
+            ).map { m.projection.fromScreenLocation(it) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val minLat = corners.minOfOrNull { it.latitude } ?: -90.0
+        val maxLat = corners.maxOfOrNull { it.latitude } ?: 90.0
+        val maxLonDelta = corners.maxOfOrNull {
+            kotlin.math.abs(normalizeLonDelta(it.longitude - center.longitude))
+        } ?: 180.0
+        val snapshot = waypointCache
+        val generation = ++waypointRenderGeneration
+        thread(name = "waypoint-viewport-render") {
+            val visible = snapshot.filter { point ->
+                point.lat in minLat..maxLat &&
+                    kotlin.math.abs(normalizeLonDelta(point.lon - center.longitude)) <= maxLonDelta
+            }
+            val display = if (visible.size > 5_000) {
+                val cosLat = kotlin.math.cos(Math.toRadians(center.latitude))
+                visible.sortedBy { point ->
+                    val dx = normalizeLonDelta(point.lon - center.longitude) * 111_320.0 * cosLat
+                    val dy = (point.lat - center.latitude) * 110_574.0
+                    dx * dx + dy * dy
+                }.take(5_000)
+            } else visible
+            val geo = Geo.pointFc(display.map { LatLng(it.lat, it.lon) }, display.map { it.name })
+            runOnUiThread {
+                if (generation == waypointRenderGeneration && !isFinishing && !isDestroyed) {
                     src("ovl-wpt")?.setGeoJson(geo)
                 }
             }
