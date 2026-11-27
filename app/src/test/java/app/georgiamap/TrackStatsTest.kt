@@ -70,7 +70,7 @@ class TrackStatsTest {
     @Test
     fun calculatesStatisticsForHundredThousandRecordedPoints() {
         val samples = (0 until 100_000).map {
-            TrackStats.Sample(41.0 + it * 0.000001, 44.0, 100.0, 1_000L + it * 1_000L)
+            TrackStats.Sample(41.0 + it * 0.00001, 44.0, 100.0, 1_000L + it * 1_000L)
         }
         val result = TrackStats.calculate(listOf(samples))
         assertEquals(100_000, result.pointCount)
