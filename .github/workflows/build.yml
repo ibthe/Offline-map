@@ -28,10 +28,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Resolve pinned Planetiler release
+      - name: Read pinned Planetiler release
         id: planetiler
         run: |
-          version=$(curl -fsSL --retry 3 https://api.github.com/repos/onthegomap/planetiler/releases/latest | python -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          version="$(tr -d '[:space:]' < tools/planetiler_version.txt)"
+          if [[ ! "$version" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+            echo "::error::Invalid Planetiler version: $version"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Fingerprint the requested OSM source
@@ -56,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/georgia.mbtiles
-          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
+          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
 
       - name: Cache search index
         id: cache_places
@@ -274,7 +278,7 @@ jobs:
         env:
           OSM_FINGERPRINT: ${{ steps.source.outputs.osm_fingerprint }}
           PLANETILER_VERSION: ${{ steps.planetiler.outputs.version }}
-          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
+          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_version.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
         run: |
           echo "version=${PLANETILER_VERSION}-${OSM_FINGERPRINT}-${DATA_TOOLS}" >> "$GITHUB_OUTPUT"
 
