@@ -16,15 +16,15 @@ import kotlin.math.sqrt
 import kotlin.math.tan
 
 /** Waypoints and recorded tracks (private, on-device). */
-class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 4) {
+class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 5) {
 
-    data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double, val ts: Long = 0L, val favorite: Boolean = false)
+    data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double, val ts: Long = 0L, val favorite: Boolean = false, val note: String = "")
     data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long, val segment: Int = 0)
     data class Track(val id: Long, val name: String, val start: Long, val count: Int)
     data class ImportTrack(val name: String, val points: List<Pt>)
 
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer, favorite integer not null default 0)")
+        db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer, favorite integer not null default 0, note text not null default '')")
         db.execSQL("create index waypoints_favorite_idx on waypoints(favorite,id)")
         db.execSQL("create table tracks(id integer primary key autoincrement, name text, start integer)")
         db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real, segment integer not null default 0)")
@@ -44,11 +44,14 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 4) {
             db.execSQL("alter table waypoints add column favorite integer not null default 0")
             db.execSQL("create index if not exists waypoints_favorite_idx on waypoints(favorite,id)")
         }
+        if (oldVersion < 5) {
+            db.execSQL("alter table waypoints add column note text not null default ''")
+        }
     }
 
-    fun addWaypoint(name: String, lat: Double, lon: Double): Long {
+    fun addWaypoint(name: String, lat: Double, lon: Double, note: String = ""): Long {
         val v = ContentValues()
-        v.put("name", name); v.put("lat", lat); v.put("lon", lon); v.put("ts", System.currentTimeMillis())
+        v.put("name", name); v.put("lat", lat); v.put("lon", lon); v.put("ts", System.currentTimeMillis()); v.put("note", note.trim())
         return writableDatabase.insert("waypoints", null, v)
     }
 
@@ -58,14 +61,19 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 4) {
 
     fun waypoints(): List<Wpt> {
         val out = ArrayList<Wpt>()
-        readableDatabase.rawQuery("select id,name,lat,lon,ts,favorite from waypoints order by favorite desc,id", null).use { c ->
-            while (c.moveToNext()) out.add(Wpt(c.getLong(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3), c.getLong(4), c.getInt(5) != 0))
+        readableDatabase.rawQuery("select id,name,lat,lon,ts,favorite,note from waypoints order by favorite desc,id", null).use { c ->
+            while (c.moveToNext()) out.add(Wpt(c.getLong(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3), c.getLong(4), c.getInt(5) != 0, c.getString(6) ?: ""))
         }
         return out
     }
 
     fun setWaypointFavorite(id: Long, favorite: Boolean) {
         val values = ContentValues().apply { put("favorite", if (favorite) 1 else 0) }
+        writableDatabase.update("waypoints", values, "id=?", arrayOf(id.toString()))
+    }
+
+    fun updateWaypointNote(id: Long, note: String) {
+        val values = ContentValues().apply { put("note", note.trim()) }
         writableDatabase.update("waypoints", values, "id=?", arrayOf(id.toString()))
     }
 
