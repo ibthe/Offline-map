@@ -46,6 +46,16 @@ class TrackPauseDetectorTest {
     }
 
     @Test
+    fun disabledAutoPauseAlwaysRecordsAcceptedFixes() {
+        val detector = TrackPauseDetector(enabled = false)
+        repeat(8) { i ->
+            assertEquals(TrackPauseDetector.Event.RECORD,
+                detector.onFix(41.0, 44.0, 1_000L + i * 30_000L, 5.0))
+        }
+        assertTrue(!detector.isPaused)
+    }
+
+    @Test
     fun rejectsInvalidAndOutOfOrderFixes() {
         val detector = TrackPauseDetector()
         assertEquals(TrackPauseDetector.Event.SKIP,
