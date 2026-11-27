@@ -759,7 +759,11 @@ class MainActivity : AppCompatActivity() {
             true
         }
         m.addOnMapClickListener { ll ->
-            if (rulerOn && navMode == NavMode.IDLE) { rulerPts.add(ll); refreshRuler(); true }
+            if (rulerOn && navMode == NavMode.IDLE) {
+                if (rulerPts.size >= 2_000) toast("Достигнут предел в 2 000 точек измерения")
+                else { rulerPts.add(ll); refreshRuler() }
+                true
+            }
             else {
                 val w = if (navMode == NavMode.ACTIVE) null else nearestWaypoint(m, ll)
                 if (w != null) { pendingFrom = null; setDestination(LatLng(w.lat, w.lon), w.name); true } else false
@@ -1202,7 +1206,8 @@ class MainActivity : AppCompatActivity() {
     private fun refreshRuler() {
         val visible = rulerOn && navMode == NavMode.IDLE
         val points = if (visible) rulerPts else emptyList()
-        src("ovl-ruler")?.setGeoJson(Geo.lineFc(points))
+        val outline = if (visible && rulerAreaMode && points.size >= 3) points + points.first() else points
+        src("ovl-ruler")?.setGeoJson(Geo.lineFc(outline))
         src("ovl-ruler-area")?.setGeoJson(if (visible && rulerAreaMode) Geo.polygonFc(points) else Geo.polygonFc(emptyList()))
         src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(points))
         updateInfo()
@@ -1500,7 +1505,8 @@ class MainActivity : AppCompatActivity() {
         val current = if (!rulerOn) "выключено" else if (rulerAreaMode) "площадь" else "расстояние"
         MaterialAlertDialogBuilder(this)
             .setTitle("Измерение · сейчас: $current")
-            .setItems(arrayOf("Измерять расстояние", "Измерять площадь", "Выключить и очистить")) { _, which ->
+            .setItems(arrayOf("Измерять расстояние", "Измерять площадь",
+                "Отменить последнюю точку", "Выключить и очистить")) { _, which ->
                 when (which) {
                     0, 1 -> {
                         val area = which == 1
@@ -1510,7 +1516,9 @@ class MainActivity : AppCompatActivity() {
                         prefs.edit().putBoolean("ruler_on", true).putBoolean("ruler_area_mode", area).apply()
                         toast(if (area) "Режим площади: отмечайте вершины контура" else "Режим расстояния: отмечайте точки линии")
                     }
-                    2 -> {
+                    2 -> if (rulerPts.isNotEmpty()) rulerPts.removeAt(rulerPts.lastIndex)
+                        else toast("Пока нет точек для отмены")
+                    3 -> {
                         rulerOn = false
                         rulerPts.clear()
                         prefs.edit().putBoolean("ruler_on", false).apply()
@@ -2985,10 +2993,10 @@ class MainActivity : AppCompatActivity() {
             if (route.pointCount <= 1) return LatLng(route.lat(0), route.lon(0))
             val cumulative = DoubleArray(route.pointCount)
             for (i in 1 until route.pointCount) {
-                val midLat = (route.lat(i - 1) + route.lat(i)) / 2.0
-                val dx = (route.lon(i) - route.lon(i - 1)) * 111320.0 * Math.cos(Math.toRadians(midLat))
-                val dy = (route.lat(i) - route.lat(i - 1)) * 110574.0
-                cumulative[i] = cumulative[i - 1] + kotlin.math.hypot(dx, dy)
+                cumulative[i] = cumulative[i - 1] + RouteAnalysis.distance(
+                    RouteAnalysis.Point(route.lat(i - 1), route.lon(i - 1)),
+                    RouteAnalysis.Point(route.lat(i), route.lon(i))
+                )
             }
             val target = cumulative.last() * fraction
             val index = (1 until route.pointCount).firstOrNull { cumulative[it] >= target } ?: route.pointCount - 1
@@ -2996,7 +3004,7 @@ class MainActivity : AppCompatActivity() {
             val t = if (length > 0.0) ((target - cumulative[index - 1]) / length).coerceIn(0.0, 1.0) else 0.0
             return LatLng(
                 route.lat(index - 1) + (route.lat(index) - route.lat(index - 1)) * t,
-                route.lon(index - 1) + (route.lon(index) - route.lon(index - 1)) * t
+                ((route.lon(index - 1) + (((route.lon(index) - route.lon(index - 1) + 540.0) % 360.0) - 180.0) * t + 540.0) % 360.0) - 180.0
             )
         }
         return listOf(0.25, 0.5, 0.75).any { fraction ->
