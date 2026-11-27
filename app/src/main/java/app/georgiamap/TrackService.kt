@@ -39,6 +39,9 @@ class TrackService : Service() {
     private val activeProviders = LinkedHashSet<String>()
     private var lastAcceptedLocationTime = 0L
     private var lastAcceptedAccuracy = Float.POSITIVE_INFINITY
+    private var lastRecordedLocationTime = 0L
+    private var currentSegment = 0
+    private val segmentGapMs = 5 * 60 * 1000L
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
@@ -47,14 +50,19 @@ class TrackService : Service() {
             val now = System.currentTimeMillis()
             if (id <= 0 || (accuracy.isFinite() && accuracy > 75f) ||
                 !LocationQuality.shouldAccept(l.time, accuracy, lastAcceptedLocationTime, lastAcceptedAccuracy, now)) return
+            if (lastRecordedLocationTime > 0L && l.time - lastRecordedLocationTime > segmentGapMs) {
+                currentSegment++
+            }
             lastAcceptedLocationTime = l.time
             lastAcceptedAccuracy = accuracy
+            lastRecordedLocationTime = l.time
+            val segment = currentSegment
             val lat = l.latitude
             val lon = l.longitude
             val ele = if (l.hasAltitude()) l.altitude else Double.NaN
             val timestamp = l.time
             writeHandler?.post {
-                try { db?.addPoint(id, lat, lon, ele, timestamp) } catch (_: Exception) { }
+                try { db?.addPoint(id, lat, lon, ele, timestamp, segment) } catch (_: Exception) { }
             }
         }
 
@@ -84,6 +92,11 @@ class TrackService : Service() {
         if (running) return START_STICKY
         if (db == null) db = UserDb(this)
         trackId = getSharedPreferences("settings", MODE_PRIVATE).getLong("rec_track", 0L)
+        db?.lastTrackPoint(trackId)?.let { last ->
+            lastRecordedLocationTime = last.ts
+            lastAcceptedLocationTime = last.ts
+            currentSegment = last.segment
+        }
         if (Build.VERSION.SDK_INT >= 26) {
             val ch = NotificationChannel(CHANNEL, "Запись трека", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)

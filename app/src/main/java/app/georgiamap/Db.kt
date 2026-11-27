@@ -13,7 +13,7 @@ import kotlin.math.ln
 import kotlin.math.tan
 
 /** Waypoints and recorded tracks (private, on-device). */
-class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
+class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 3) {
 
     data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double, val ts: Long = 0L)
     data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long, val segment: Int = 0)
@@ -24,7 +24,6 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer)")
         db.execSQL("create table tracks(id integer primary key autoincrement, name text, start integer)")
         db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real, segment integer not null default 0)")
-        db.execSQL("create index tp_idx on track_points(track_id)")
         db.execSQL("create index tp_segment_idx on track_points(track_id,segment,id)")
     }
 
@@ -32,6 +31,10 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         if (oldVersion < 2) {
             db.execSQL("alter table track_points add column segment integer not null default 0")
             db.execSQL("create index if not exists tp_segment_idx on track_points(track_id,segment,id)")
+        }
+        if (oldVersion < 3) {
+            // tp_segment_idx already covers track_id lookups; the old single-column index was redundant.
+            db.execSQL("drop index if exists tp_idx")
         }
     }
 
@@ -63,11 +66,22 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         return writableDatabase.insert("tracks", null, v)
     }
 
-    fun addPoint(trackId: Long, lat: Double, lon: Double, ele: Double, ts: Long) {
+    fun lastTrackPoint(trackId: Long): Pt? =
+        readableDatabase.rawQuery(
+            "select lat,lon,ele,ts,segment from track_points where track_id=? order by segment desc,id desc limit 1",
+            arrayOf(trackId.toString())
+        ).use { c ->
+            if (!c.moveToFirst()) null else Pt(
+                c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2),
+                c.getLong(3), c.getInt(4)
+            )
+        }
+
+    fun addPoint(trackId: Long, lat: Double, lon: Double, ele: Double, ts: Long, segment: Int = 0) {
         val v = ContentValues()
         v.put("track_id", trackId); v.put("ts", ts); v.put("lat", lat); v.put("lon", lon)
         if (!ele.isNaN()) v.put("ele", ele)
-        v.put("segment", 0)
+        v.put("segment", segment.coerceAtLeast(0))
         writableDatabase.insert("track_points", null, v)
     }
 
@@ -105,7 +119,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
             for (w in waypoints) {
                 val v = ContentValues().apply {
                     put("name", w.name); put("lat", w.lat); put("lon", w.lon)
-                    put("ts", w.ts.takeIf { it > 0L } ?: System.currentTimeMillis())
+                    put("ts", w.ts.coerceAtLeast(0L))
                 }
                 db.insertOrThrow("waypoints", null, v)
             }

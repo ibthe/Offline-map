@@ -1681,8 +1681,7 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ GPX
 
-    private fun esc(s: String) = s.filter { it == '\t' || it == '\n' || it == '\r' || it >= ' ' }
-        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+    private fun esc(s: String) = GpxXml.escapeText(s)
 
     private fun writeGpx(uri: Uri) {
         if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) {
