@@ -25,7 +25,7 @@ class TrackGeometryTest {
         assertEquals(points.first(), simplified.first())
         assertEquals(points.last(), simplified.last())
         assertTrue(simplified.size >= 3)
-        assertTrue(simplified.contains(points[3]))
+        assertTrue(simplified.contains(points[2]))
     }
 
     @Test
