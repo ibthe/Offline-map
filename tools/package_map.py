@@ -2,7 +2,7 @@
 """Pack prepared regional map assets into an importable .gmap archive.
 
 Example:
-  python tools/package_map.py --id armenia --title "Армения" --country-code AM \
+  python tools/package_map.py --id armenia --title "Армения" --country-code AM --emergency-number 112 \
     --bounds 38.8 43.4 41.3 46.7 --tiles tiles.mbtiles --places places.db \
     --routing routing.bin --output armenia.gmap
 """
