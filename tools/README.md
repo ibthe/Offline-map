@@ -41,4 +41,4 @@ profile must report missing samples rather than treating them as sea level or ze
 
 Regional package manifests accept `emergencyNumber`. The regional workflow requires the builder to supply a verified local number; the app does not assume that Georgia's 112 applies to every installed country.
 
-`build_routing.py` stores `tracktype` grade (bits 20–22) and OSM `smoothness` (bits 23–25) in edge flags. The app uses these fields together with the unpaved and highway-class flags to apply soft route-avoidance preferences; missing OSM tags remain unknown rather than being guessed.
+`build_routing.py` stores `tracktype` grade (bits 20–22) and OSM `smoothness` (bits 23–25) and `toll=yes` (bit 26) in edge flags. The app uses these fields together with the unpaved and highway-class flags to apply soft route-avoidance preferences; missing OSM tags remain unknown rather than being guessed.
