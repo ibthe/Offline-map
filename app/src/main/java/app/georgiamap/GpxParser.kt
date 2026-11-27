@@ -140,7 +140,15 @@ object GpxParser {
             }
 
             override fun characters(ch: CharArray, start: Int, length: Int) {
-                if (textTag.isNotEmpty()) text.append(ch, start, length)
+                if (textTag.isEmpty()) return
+                val limit = when (textTag) {
+                    "wpt-note" -> 2_000
+                    "wpt-category", "wpt-folder" -> 100
+                    "wpt-name", "track-name" -> 200
+                    else -> 64
+                }
+                val remaining = limit - text.length
+                if (remaining > 0) text.append(ch, start, minOf(length, remaining))
             }
 
             override fun endElement(uri: String?, localName: String, qName: String) {
