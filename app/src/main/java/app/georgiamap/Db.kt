@@ -25,6 +25,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer, favorite integer not null default 0)")
+        db.execSQL("create index waypoints_favorite_idx on waypoints(favorite,id)")
         db.execSQL("create table tracks(id integer primary key autoincrement, name text, start integer)")
         db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real, segment integer not null default 0)")
         db.execSQL("create index tp_segment_idx on track_points(track_id,segment,id)")
