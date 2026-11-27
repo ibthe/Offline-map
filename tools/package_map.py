@@ -37,6 +37,9 @@ def create_package(args) -> Path:
         raise ValueError("Invalid bounds (expected south west north east)")
     if not args.title or len(args.title) > 80 or any(ch in args.title for ch in "\r\n="):
         raise ValueError("Title must contain 1-80 characters and cannot contain newlines or '='")
+    emergency_number = getattr(args, "emergency_number", None)
+    if emergency_number and not re.fullmatch(r"\\+?[0-9*#]{2,8}", emergency_number):
+        raise ValueError("Emergency number must contain 2-8 digits, '*' or '#' (optional leading +)")
 
     selected = []
     for key, archive_name, required in ASSETS:
@@ -52,6 +55,8 @@ def create_package(args) -> Path:
         f"id={args.id}", f"title={args.title}", f"countryCode={args.country_code}",
         f"south={south}", f"west={west}", f"north={north}", f"east={east}"
     ]
+    if emergency_number:
+        lines.append(f"emergencyNumber={emergency_number}")
     lines.extend(f"{key}={archive_name}" for key, archive_name, _ in selected)
     manifest = ("\n".join(lines) + "\n").encode("utf-8")
     output = Path(args.output)
@@ -75,6 +80,7 @@ def main():
     parser.add_argument("--relief")
     parser.add_argument("--contours")
     parser.add_argument("--routing")
+    parser.add_argument("--emergency-number", help="Region's local emergency number (required for reliable emergency guidance)")
     parser.add_argument("--output", required=True)
     create_package(parser.parse_args())
 
