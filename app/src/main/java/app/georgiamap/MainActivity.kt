@@ -116,6 +116,9 @@ class MainActivity : AppCompatActivity() {
     private var trackRenderGeneration = 0
     private var listLoadGeneration = 0
     private var diagnosticsGeneration = 0
+    private var routeAnalysisGeneration = 0
+    private var routeAnalysisBusy = false
+    private var routeAnalysisResult: RouteAnalysis.Result? = null
 
     private var rulerOn = false
     private val rulerPts = ArrayList<LatLng>()
@@ -472,6 +475,7 @@ class MainActivity : AppCompatActivity() {
         trackRenderGeneration++
         listLoadGeneration++
         diagnosticsGeneration++
+        routeAnalysisGeneration++
         searchTask?.let { ui.removeCallbacks(it) }
         elevationTask?.let { ui.removeCallbacks(it) }
         tts?.shutdown()
@@ -2328,11 +2332,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun setSummary(remM: Double, remS: Double, note: String = "") {
         findViewById<TextView>(R.id.navMain).text = Geo.fmtDist(remM) + " · " + fmtDur(remS)
+        val terrainStatus = when {
+            routeAnalysisBusy -> " · анализ высот…"
+            routeAnalysisResult?.hasElevation == true -> " · профиль высот ↗"
+            routeAnalysisResult != null -> " · рельеф частично недоступен ↗"
+            elevation == null -> " · нет данных рельефа ↗"
+            else -> " · профиль высот ↗"
+        }
         findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
             " · " + routePreferenceName(routePreference) +
             (if (pendingFrom != null) "\nот «$pendingFromName»" else "") +
             (if (navDestName.isNotBlank()) "\n→ $navDestName" else "") +
-            (if (note.isNotEmpty()) "\n$note" else "")
+            (if (note.isNotEmpty()) "\n$note" else "") + terrainStatus
     }
 
     /** When there is no road next to a point, the nearest one is used: say how far it is. */
@@ -2372,6 +2383,12 @@ class MainActivity : AppCompatActivity() {
             v.setBackgroundResource(if (sel) R.drawable.bg_chip_selected else R.drawable.bg_chip)
             v.setTextColor(themeColorInt(if (sel) R.attr.gmOnAccentContainer else R.attr.gmTextSecondary))
         }
+        val navSub = findViewById<TextView>(R.id.navSub)
+        navSub.isClickable = mode == NavMode.PREVIEW
+        navSub.isFocusable = mode == NavMode.PREVIEW
+        navSub.setOnClickListener(if (mode == NavMode.PREVIEW) View.OnClickListener {
+            showRouteAnalysisDialog()
+        } else null)
         when (mode) {
             NavMode.PLACE -> {
                 findViewById<TextView>(R.id.navMain).text = navDestName
@@ -2472,11 +2489,128 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRoutePreview(route: RouteResult) {
+        routeAnalysisGeneration++
+        routeAnalysisBusy = false
+        routeAnalysisResult = null
         session = NavSession(route, navProfile)
         drawRoute(route)
         fitRoute(route)
         navMode = NavMode.PREVIEW
         updateNavUi()
+        startRouteTerrainAnalysis(route)
+    }
+
+    /** Reads the offline DEM away from the UI thread and caps work for very long routes. */
+    private fun startRouteTerrainAnalysis(route: RouteResult) {
+        val db = elevation
+        if (db == null || route.pointCount < 2) {
+            routeAnalysisBusy = false
+            routeAnalysisResult = null
+            updateNavUi()
+            return
+        }
+        val generation = ++routeAnalysisGeneration
+        routeAnalysisBusy = true
+        updateNavUi()
+        thread(name = "route-terrain-analysis") {
+            val result = try {
+                val points = (0 until route.pointCount).map { i ->
+                    RouteAnalysis.Point(route.lat(i), route.lon(i))
+                }
+                val samples = RouteAnalysis.sample(points, spacingM = 100.0, maxSamples = 240) { lat, lon ->
+                    db.at(lat, lon)?.toDouble()
+                }
+                RouteAnalysis.calculate(samples, route.distanceM)
+            } catch (_: Exception) {
+                null
+            }
+            runOnUiThread {
+                if (generation != routeAnalysisGeneration || navMode != NavMode.PREVIEW ||
+                    isFinishing || isDestroyed) return@runOnUiThread
+                routeAnalysisBusy = false
+                routeAnalysisResult = result
+                updateNavUi()
+            }
+        }
+    }
+
+    private fun showRouteAnalysisDialog() {
+        if (routeAnalysisBusy) {
+            toast("Рассчитываю профиль высот…")
+            return
+        }
+        val result = routeAnalysisResult
+        if (result == null || !result.hasElevation) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Профиль высот")
+                .setMessage(
+                    if (elevation == null) "В этом пакете карты нет офлайн-данных рельефа."
+                    else "Не удалось получить достаточно высотных данных для этого маршрута. Возможно, участок находится вне покрытия модели рельефа."
+                )
+                .setPositiveButton("Закрыть", null)
+                .show()
+            return
+        }
+
+        val density = resources.displayMetrics.density
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((18 * density).toInt(), (8 * density).toInt(),
+                (18 * density).toInt(), (8 * density).toInt())
+        }
+        val range = if (result.minElevationM != null && result.maxElevationM != null)
+            "${result.minElevationM.roundToInt()}–${result.maxElevationM.roundToInt()} м"
+        else "нет данных"
+        val difficulty = when (result.difficulty) {
+            RouteAnalysis.Difficulty.EASY -> "Небольшой рельеф"
+            RouteAnalysis.Difficulty.MODERATE -> "Умеренно сложный рельеф"
+            RouteAnalysis.Difficulty.HARD -> "Сложный рельеф"
+            RouteAnalysis.Difficulty.UNKNOWN -> "Недостаточно данных"
+        }
+        val summary = buildString {
+            append("Высота: ").append(range).append("\n")
+            append("Набор: +").append(result.ascentM.roundToInt()).append(" м")
+            append("   Сброс: −").append(result.descentM.roundToInt()).append(" м\n")
+            result.maxUphillGradePct?.let { append("Максимальный подъём: ").append(it.roundToInt()).append("%\n") }
+            result.maxDownhillGradePct?.let { append("Максимый спуск: ").append(it.roundToInt()).append("%\n") }
+            append("Оценка рельефа: ").append(difficulty).append("\n")
+            append("Покрытие высотными данными: ").append(result.coveragePct).append("%")
+        }
+        content.addView(android.widget.TextView(this).apply {
+            text = summary
+            textSize = 15f
+            setTextColor(themeColorInt(R.attr.gmTextPrimary))
+        })
+        content.addView(RouteElevationProfileView(this).apply {
+            setProfile(result)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (190 * density).toInt()
+            ).apply { topMargin = (8 * density).toInt() }
+        })
+        if (result.steepSections.isNotEmpty()) {
+            val steepText = result.steepSections.take(5).joinToString("\n") { section ->
+                val direction = if (section.uphill) "подъём" else "спуск"
+                "$direction ${section.fromM.roundToInt()}–${section.toM.roundToInt()} м: " +
+                    "${section.averageGradePct.roundToInt()}%"
+            }
+            content.addView(android.widget.TextView(this).apply {
+                text = "Крутые участки (от 12%):\n$steepText"
+                textSize = 14f
+                setTextColor(themeColorInt(R.attr.gmTextPrimary))
+                setPadding(0, (10 * density).toInt(), 0, 0)
+            })
+        }
+        content.addView(android.widget.TextView(this).apply {
+            text = "\nОценка учитывает только высотный профиль и не определяет состояние троп, осыпи, лавинную опасность или фактическую проходимость. Используйте её как ориентир, а не гарантию безопасности."
+            textSize = 12f
+            setTextColor(themeColorInt(R.attr.gmTextSecondary))
+        })
+        val scroll = android.widget.ScrollView(this).apply { addView(content) }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Профиль высот маршрута")
+            .setView(scroll)
+            .setPositiveButton("Закрыть", null)
+            .show()
     }
 
     private fun routeOptionLabel(label: String, route: RouteResult): String {
