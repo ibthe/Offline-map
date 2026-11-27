@@ -93,8 +93,9 @@ object MapPackages {
         require(id == directory && id.matches(Regex("[a-z0-9][a-z0-9_-]{1,31}")) && id != DEFAULT_ID) {
             "Invalid package id"
         }
-        val title = properties.getProperty("title")?.trim()?.takeIf { it.isNotEmpty() && it.length <= 80 }
-            ?: error("Missing package title")
+        val title = properties.getProperty("title")?.trim()?.takeIf {
+            it.isNotEmpty() && it.length <= 80 && !it.contains('\\n') && !it.contains('\\r') && !it.contains('=')
+        } ?: error("Missing or invalid package title")
         val country = properties.getProperty("countryCode")?.trim() ?: error("Missing country code")
         require(country.matches(Regex("[A-Z]{2}"))) { "Invalid country code" }
         fun number(key: String) = properties.getProperty(key)?.trim()?.toDoubleOrNull()
