@@ -28,7 +28,7 @@ class GpxParserTest {
         assertTrue(parsed.waypoints[0].timestampMs > 0L)
         assertEquals(2, parsed.tracks.size)
         assertEquals("Mountain walk", parsed.tracks[0].name)
-        assertEquals(2, parsed.tracks[0].points[0].segment + parsed.tracks[0].points[2].segment)
+        assertEquals(1, parsed.tracks[0].points[0].segment + parsed.tracks[0].points[2].segment)
         assertEquals(0, parsed.tracks[0].points[0].segment)
         assertEquals(1, parsed.tracks[0].points[2].segment)
         assertEquals(0L, parsed.tracks[0].points[1].timestampMs)
