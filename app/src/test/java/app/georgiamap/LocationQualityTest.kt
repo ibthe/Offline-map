@@ -31,6 +31,7 @@ class LocationQualityTest {
     @Test
     fun newerFixCanReplaceOldFixAndStaleCurrentFixDoesNotBlockRecovery() {
         assertTrue(LocationQuality.shouldAccept(now, 100f, now - 40_000L, 5f, now))
+        assertTrue(LocationQuality.shouldAccept(now - 2_000L, 12f, now - 40_000L, 5f, now))
         assertFalse(LocationQuality.shouldAccept(now - 6_000L, 5f, now, 10f, now))
     }
 

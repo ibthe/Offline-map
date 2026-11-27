@@ -19,6 +19,10 @@ object TrackStats {
         val elevationSamples: Int
     )
 
+    private const val MAX_PLAUSIBLE_SPEED_KMH = 250.0
+    private const val MIN_MOVING_SPEED_KMH = 1.0
+    private const val MAX_MOVING_INTERVAL_MS = 5 * 60 * 1000L
+
     fun calculate(segments: List<List<Sample>>): Result {
         var distance = 0.0
         var ascent = 0.0
@@ -46,19 +50,26 @@ object TrackStats {
                 val dx = (b.lon - a.lon) * 111_320.0 * cos(Math.toRadians((a.lat + b.lat) / 2.0))
                 val dy = (b.lat - a.lat) * 110_574.0
                 val d = hypot(dx, dy)
+                val dt = b.timestampMs - a.timestampMs
+                val hasShortTimedInterval = a.timestampMs > 0L &&
+                    b.timestampMs > a.timestampMs && dt <= MAX_MOVING_INTERVAL_MS
+                val speed = if (hasShortTimedInterval) d / dt * 3_600.0 else null
+
+                // A timestamped jump above plausible travel speed is a GPS/GPX outlier.
+                // Exclude it from distance and elevation too, not just from speed statistics.
+                if (speed != null && (!speed.isFinite() || speed > MAX_PLAUSIBLE_SPEED_KMH)) continue
+
                 distance += d
                 if (a.elevationM.isFinite() && b.elevationM.isFinite()) {
                     val delta = b.elevationM - a.elevationM
                     if (delta >= 3.0) ascent += delta
                     else if (delta <= -3.0) descent -= delta
                 }
-                val dt = b.timestampMs - a.timestampMs
-                if (a.timestampMs > 0L && b.timestampMs > a.timestampMs && dt <= 5 * 60 * 1000L) {
-                    val speed = d / dt * 3_600.0
-                    if (speed.isFinite() && speed <= 250.0) {
+                if (speed != null) {
+                    maxSpeed = maxOf(maxSpeed, speed)
+                    if (speed >= MIN_MOVING_SPEED_KMH) {
                         moving += dt
                         movingDistance += d
-                        maxSpeed = maxOf(maxSpeed, speed)
                     }
                 }
             }

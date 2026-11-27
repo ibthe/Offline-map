@@ -48,10 +48,23 @@ class TrackStatsTest {
             TrackStats.Sample(41.0, 44.0, 10.0, 1_000L),
             TrackStats.Sample(41.1, 44.1, 10.0, 2_000L)
         )))
-        assertTrue(result.distanceM > 10_000.0)
+        assertEquals(0.0, result.distanceM, 0.001)
+        assertEquals(0.0, result.ascentM, 0.001)
+        assertEquals(0.0, result.descentM, 0.001)
         assertEquals(0L, result.movingMs)
         assertEquals(0.0, result.averageSpeedKmh, 0.0)
         assertEquals(0.0, result.maxSpeedKmh, 0.0)
+    }
+
+    @Test
+    fun stationaryIntervalsDoNotInflateMovingTimeOrAverageSpeed() {
+        val result = TrackStats.calculate(listOf(listOf(
+            TrackStats.Sample(41.0, 44.0, 10.0, 1_000L),
+            TrackStats.Sample(41.0, 44.0, 10.0, 61_000L),
+            TrackStats.Sample(41.001, 44.0, 10.0, 121_000L)
+        )))
+        assertEquals(60_000L, result.movingMs)
+        assertTrue(result.averageSpeedKmh > 0.0)
     }
 
     @Test

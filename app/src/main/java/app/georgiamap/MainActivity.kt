@@ -77,6 +77,13 @@ import java.util.TimeZone
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
+private object GpxTransferLock {
+    private val active = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun tryBegin(): Boolean = active.compareAndSet(false, true)
+    fun finish() { active.set(false) }
+    val isBusy: Boolean get() = active.get()
+}
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
@@ -1629,6 +1636,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleRecording() {
+        if (GpxTransferLock.isBusy) {
+            toast("Дождитесь завершения импорта или экспорта GPX")
+            return
+        }
         if (TrackService.running) {
             val savedId = prefs.getLong("rec_track", 0L)
             stopService(Intent(this, TrackService::class.java))
@@ -1710,7 +1721,9 @@ class MainActivity : AppCompatActivity() {
                                 1 -> { if (shownTrackId == t.id) { shownTrackId = -1L; prefs.edit().putLong("shown_track", -1L).apply() }; refreshTrack() }
                                 2 -> showTrackStats(t)
                                 3 -> {
-                                    if (prefs.getLong("rec_track", 0L) == t.id) {
+                                    if (GpxTransferLock.isBusy) {
+                                        toast("Дождитесь завершения операции GPX")
+                                    } else if (prefs.getLong("rec_track", 0L) == t.id) {
                                         toast("Сначала остановите запись")
                                     } else {
                                         loadingText.text = "Удаляю трек…"
@@ -1821,6 +1834,10 @@ class MainActivity : AppCompatActivity() {
             toast("Остановите запись перед экспортом GPX, чтобы сохранить все точки")
             return
         }
+        if (!GpxTransferLock.tryBegin()) {
+            toast("Уже выполняется операция с GPX")
+            return
+        }
         toast("Экспортирую GPX…")
         thread(name = "gpx-export") {
             try {
@@ -1855,6 +1872,8 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { if (!isFinishing && !isDestroyed) toast("GPX сохранён") }
             } catch (e: Exception) {
                 runOnUiThread { if (!isFinishing && !isDestroyed) toast("Ошибка экспорта: ${e.message}") }
+            } finally {
+                GpxTransferLock.finish()
             }
         }
     }
@@ -1862,6 +1881,10 @@ class MainActivity : AppCompatActivity() {
     private fun readGpx(uri: Uri) {
         if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) {
             toast("Остановите запись трека перед импортом GPX")
+            return
+        }
+        if (!GpxTransferLock.tryBegin()) {
+            toast("Уже выполняется операция с GPX")
             return
         }
         loadingText.text = "Импортирую GPX…"
@@ -1895,9 +1918,13 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
-                        loading.visibility = View.GONE
                         toast("Ошибка импорта: ${e.message}")
                     }
+                }
+            } finally {
+                GpxTransferLock.finish()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) loading.visibility = View.GONE
                 }
             }
         }
