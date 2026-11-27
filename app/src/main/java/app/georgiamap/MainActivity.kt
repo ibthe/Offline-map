@@ -1585,13 +1585,15 @@ class MainActivity : AppCompatActivity() {
             textSize = 16f
             setTextIsSelectable(true)
         })
+        val emergencyNumber = mapPackage.emergencyNumber
         content.addView(android.widget.TextView(this).apply {
             text = "\nПеред выходом:\n• Сохраните маршрут и важные точки\n• Сообщите близким маршрут и время возвращения\n" +
                 "• Проверьте прогноз погоды и местные ограничения дорог/перевалов\n" +
                 "• Возьмите воду, тёплую одежду, аптечку и запас питания\n" +
                 "• Зарядите телефон и возьмите внешний аккумулятор\n" +
                 "• В горах не полагайтесь только на GPS и офлайн-карту\n\n" +
-                "Экстренный номер в Грузии: 112"
+                (emergencyNumber?.let { "Экстренный номер региона: $it" }
+                    ?: "Экстренный номер для этого региона не указан в пакете карт. Уточните его заранее.")
             textSize = 14f
         })
 
@@ -1627,9 +1629,12 @@ class MainActivity : AppCompatActivity() {
         action(if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) "Остановить запись трека" else "Начать запись трека") {
             toggleRecording()
         }
-        action("Экстренный вызов 112") {
+        action(
+            emergencyNumber?.let { "Экстренный вызов $it" } ?: "Экстренный номер не задан",
+            emergencyNumber != null
+        ) {
             try {
-                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112")))
+                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$emergencyNumber")))
             } catch (_: Exception) {
                 toast("Не удалось открыть приложение телефона")
             }
