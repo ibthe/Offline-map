@@ -43,6 +43,8 @@ data class MapPackage(
     val reliefAsset: String?,
     val contoursAsset: String?,
     val routingAsset: String?,
+    /** Region-specific emergency number; absent packages must not guess a number. */
+    val emergencyNumber: String? = null,
     /** Null for the built-in Georgia package; otherwise a child of filesDir/map-packages. */
     val directory: String? = null
 ) {
@@ -68,7 +70,8 @@ object MapPackages {
         placesAsset = "places.db",
         reliefAsset = "relief.mbtiles",
         contoursAsset = "contours.mbtiles",
-        routingAsset = "routing.bin"
+        routingAsset = "routing.bin",
+        emergencyNumber = "112"
     )
 
     val available: List<MapPackage> = listOf(GEORGIA)
@@ -107,6 +110,9 @@ object MapPackages {
             properties.getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }?.also {
                 require(it == expected) { "Invalid asset name for $key" }
             }
+        val emergencyNumber = properties.getProperty("emergencyNumber")?.trim()?.takeIf { it.isNotEmpty() }?.also {
+            require(it.matches(Regex("\\+?[0-9*#]{2,8}"))) { "Invalid emergency number" }
+        }
         val tiles = properties.getProperty("tiles")?.trim() ?: error("Missing tiles asset")
         require(tiles == "tiles.mbtiles") { "Invalid tiles asset name" }
         return MapPackage(
@@ -117,6 +123,7 @@ object MapPackages {
             optionalAsset("relief", "relief.mbtiles"),
             optionalAsset("contours", "contours.mbtiles"),
             optionalAsset("routing", "routing.bin"),
+            emergencyNumber,
             directory
         )
     }
