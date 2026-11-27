@@ -1,7 +1,6 @@
 package app.georgiamap
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,6 +23,11 @@ class RouteAnalysisTest {
         assertEquals(20.0, result.maxUphillGradePct!!, 0.001)
         assertEquals(30.0, result.maxDownhillGradePct!!, 0.001)
         assertEquals(RouteAnalysis.Difficulty.HARD, result.difficulty)
+        assertEquals(2, result.steepSections.size)
+        assertTrue(result.steepSections[0].uphill)
+        assertEquals(20.0, result.steepSections[0].averageGradePct, 0.001)
+        assertTrue(!result.steepSections[1].uphill)
+        assertEquals(25.0, result.steepSections[1].averageGradePct, 0.001)
     }
 
     @Test
