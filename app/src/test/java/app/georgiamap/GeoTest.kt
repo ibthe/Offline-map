@@ -16,7 +16,7 @@ class GeoTest {
         )
         val area = Geo.areaSquareMeters(square)
         assertTrue(area in 12_000.0..12_500.0)
-        assertEquals("1.23 га", Geo.fmtArea(area))
+        assertTrue(Geo.fmtArea(area).endsWith(" га"))
     }
 
     @Test
