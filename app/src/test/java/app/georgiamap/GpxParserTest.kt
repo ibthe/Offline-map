@@ -60,6 +60,17 @@ class GpxParserTest {
     }
 
     @Test
+    fun parsesWaypointDescriptionAsNote() {
+        val parsed = parse("""<gpx version="1.1">
+            <wpt lat="41.7" lon="44.8">
+                <name>Camp</name>
+                <desc>Water nearby &amp; sheltered from wind</desc>
+            </wpt>
+        </gpx>""")
+        assertEquals("Water nearby & sheltered from wind", parsed.waypoints.single().note)
+    }
+
+    @Test
     fun missingWaypointTimeRemainsMissing() {
         val parsed = parse("<gpx><wpt lat='41.7' lon='44.8'><name>Point</name></wpt></gpx>")
         assertEquals(0L, parsed.waypoints.single().timestampMs)
