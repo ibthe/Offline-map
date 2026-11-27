@@ -159,7 +159,7 @@ object RouteAnalysis {
                 if (start < 0) start = from.toInt()
                 end = to.toInt()
                 val length = to - from
-                gradeSum += grade * length
+                gradeSum += abs(grade) * length
                 lengthSum += length
                 uphill = direction
             }
