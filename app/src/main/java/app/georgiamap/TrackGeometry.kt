@@ -14,7 +14,12 @@ object TrackGeometry {
         val meanLat = points.sumOf { it.lat } / points.size
         val xScale = 111_320.0 * cos(Math.toRadians(meanLat))
         val yScale = 110_574.0
-        val xs = DoubleArray(points.size) { points[it].lon * xScale }
+        val xs = DoubleArray(points.size)
+        xs[0] = points[0].lon * xScale
+        for (i in 1 until points.size) {
+            val deltaLon = ((points[i].lon - points[i - 1].lon + 540.0) % 360.0) - 180.0
+            xs[i] = xs[i - 1] + deltaLon * xScale
+        }
         val ys = DoubleArray(points.size) { points[it].lat * yScale }
         val keep = BooleanArray(points.size)
         keep[0] = true
