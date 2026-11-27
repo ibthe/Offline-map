@@ -357,10 +357,10 @@ class RoadGraph(buf: ByteBuffer) {
         var best: RouteResult? = null
         var bestCost = Double.MAX_VALUE
         for ((s, t) in pairs) {
-            // Connector time alone is a lower bound; skip pairs that cannot beat the best route.
+            // Connector cost alone is a lower bound for the selected optimization objective.
             if (connectorCost(s, t) >= bestCost) continue
             val candidate = search(fromLat, fromLon, toLat, toLon, p, preference, s, t) ?: continue
-            val cost = candidate.timeS
+            val cost = if (preference == RoutePreference.SHORTEST) candidate.distanceM else candidate.timeS
             if (cost < bestCost) {
                 best = candidate
                 bestCost = cost
@@ -391,7 +391,6 @@ class RoadGraph(buf: ByteBuffer) {
         }
 
         val heap = Heap()
-        val sp = speedMs(s.e, p)
         if (canGo(s.e, 0, p)) {                       // leave through B
             val v = eB[s.e]; val c = edgeCost(s.geomLen - s.off, s.e)
             if (c < g[v]) { g[v] = c; prev[v] = -1; heap.push(c + h(v), v) }
@@ -400,7 +399,6 @@ class RoadGraph(buf: ByteBuffer) {
             val v = eA[s.e]; val c = edgeCost(s.off, s.e)
             if (c < g[v]) { g[v] = c; prev[v] = -1; heap.push(c + h(v), v) }
         }
-        val tp = speedMs(t.e, p)
         val attachA = eA[t.e]
         val attachB = eB[t.e]
         val extraA = if (canGo(t.e, 0, p)) edgeCost(t.off, t.e) else Double.MAX_VALUE            // A -> T moving forward

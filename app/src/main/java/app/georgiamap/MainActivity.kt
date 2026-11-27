@@ -2404,6 +2404,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val profile = navProfile
+        val preference = routePreference
         if (!silent) findViewById<TextView>(R.id.navSub).text = if (graph == null) "Загружаю дорожные данные…" else "Строю маршрут…"
         thread(name = "routing") {
             try {
@@ -2412,7 +2413,7 @@ class MainActivity : AppCompatActivity() {
                         RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
                     }.also { graph = it }
                 }
-                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile, routePreference)
+                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile, preference)
                 runOnUiThread {
                     if (requestId == routeRequestId && !isFinishing && !isDestroyed) {
                         done(r, if (r == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null)
