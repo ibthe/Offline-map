@@ -68,6 +68,19 @@ class TrackStatsTest {
     }
 
     @Test
+    fun calculatesStatisticsForHundredThousandRecordedPoints() {
+        val samples = (0 until 100_000).map {
+            TrackStats.Sample(41.0 + it * 0.000001, 44.0, 100.0, 1_000L + it * 1_000L)
+        }
+        val result = TrackStats.calculate(listOf(samples))
+        assertEquals(100_000, result.pointCount)
+        assertTrue(result.distanceM > 10_000.0)
+        assertTrue(result.movingMs > 0L)
+        assertEquals(0.0, result.ascentM, 0.0)
+        assertEquals(0.0, result.descentM, 0.0)
+    }
+
+    @Test
     fun doesNotCountLongTimestampGapsAsMovingTime() {
         val result = TrackStats.calculate(listOf(listOf(
             TrackStats.Sample(41.0, 44.0, 10.0, 1_000L),
