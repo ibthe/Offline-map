@@ -44,6 +44,8 @@ class TrackService : Service() {
     private val segmentGapMs = 5 * 60 * 1000L
     private var batteryReceiverRegistered = false
     private var batteryLow = false
+    private var autoPaused = false
+    private val pauseDetector = TrackPauseDetector()
 
     private val batteryReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
@@ -66,8 +68,16 @@ class TrackService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle(if (batteryLow) "Низкий заряд · запись трека" else "Запись GPS-трека")
-            .setContentText(if (batteryLow) "Подключите питание: телефон может отключиться до сохранения экспедиции" else "Georgia Offline Map записывает маршрут")
+            .setContentTitle(when {
+                batteryLow -> "Низкий заряд · запись трека"
+                autoPaused -> "Автопауза · запись трека"
+                else -> "Запись GPS-трека"
+            })
+            .setContentText(when {
+                batteryLow -> "Подключите питание: телефон может отключиться до сохранения экспедиции"
+                autoPaused -> "Стоянка обнаружена. Запись продолжится при возобновлении движения"
+                else -> "Georgia Offline Map записывает маршрут"
+            })
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(open)
@@ -104,11 +114,29 @@ class TrackService : Service() {
             val now = System.currentTimeMillis()
             if (id <= 0 || (accuracy.isFinite() && accuracy > 75f) ||
                 !LocationQuality.shouldAccept(l.time, accuracy, lastAcceptedLocationTime, lastAcceptedAccuracy, now)) return
-            if (lastRecordedLocationTime > 0L && l.time - lastRecordedLocationTime > segmentGapMs) {
-                currentSegment++
-            }
+            val pauseEvent = pauseDetector.onFix(l.latitude, l.longitude, l.time, accuracy.toDouble())
             lastAcceptedLocationTime = l.time
             lastAcceptedAccuracy = accuracy
+            when (pauseEvent) {
+                TrackPauseDetector.Event.SKIP -> return
+                TrackPauseDetector.Event.PAUSED -> {
+                    autoPaused = true
+                    updateRecordingNotification()
+                    return
+                }
+                TrackPauseDetector.Event.RESUMED -> {
+                    autoPaused = false
+                    currentSegment++
+                    // The resumed fix starts a new segment; never connect it to the last point before the stop.
+                    lastRecordedLocationTime = 0L
+                    updateRecordingNotification()
+                }
+                TrackPauseDetector.Event.RECORD -> Unit
+            }
+            if (pauseEvent != TrackPauseDetector.Event.RESUMED &&
+                lastRecordedLocationTime > 0L && l.time - lastRecordedLocationTime > segmentGapMs) {
+                currentSegment++
+            }
             lastRecordedLocationTime = l.time
             val segment = currentSegment
             val lat = l.latitude
