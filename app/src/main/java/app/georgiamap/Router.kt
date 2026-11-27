@@ -68,7 +68,9 @@ class RouteResult(
     /** distance from the requested start / end point to the road the route was attached to (0 = on the road) */
     val startOffM: Double = 0.0, val endOffM: Double = 0.0,
     /** Cost used to select this route after applying user avoidance preferences. */
-    val preferenceCost: Double = timeS
+    val preferenceCost: Double = timeS,
+    /** Avoidance preferences that could not be fully satisfied by the available road graph. */
+    val warnings: List<String> = emptyList()
 ) {
     val pointCount get() = points.size / 2
     fun lat(i: Int) = points[2 * i]
@@ -499,7 +501,7 @@ class RoadGraph(buf: ByteBuffer) {
             }
         }
         if (best == Double.MAX_VALUE) return null
-        return build(fromLat, fromLon, toLat, toLon, p, s, t, direct, bestNode, bestViaA, best)
+        return build(fromLat, fromLon, toLat, toLon, p, s, t, direct, bestNode, bestViaA, best, avoidance)
     }
 
     // ------------------------------------------------------------------ result: geometry + instructions
@@ -520,7 +522,7 @@ class RoadGraph(buf: ByteBuffer) {
     }
 
     private fun build(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap,
-                      direct: Boolean, bestNode: Int, bestViaA: Boolean, preferenceCost: Double): RouteResult {
+                      direct: Boolean, bestNode: Int, bestViaA: Boolean, preferenceCost: Double, avoidance: Int): RouteResult {
         val pts = Pts()
         val legs = ArrayList<Leg>()
         pts.add(fromLat, fromLon)
@@ -581,8 +583,15 @@ class RoadGraph(buf: ByteBuffer) {
         time += (s.dist + t.dist) / connectorSpeedMs(p)
         legs.last().i1 = pts.n - 1
         val real = legs.filter { it.lenM >= 2.0 }
+        val warnings = ArrayList<String>()
+        if ((avoidance and RouteAvoidance.UNPAVED) != 0 && legs.any { isUnpaved(it.e) })
+            warnings.add("В маршруте остались грунтовые или неасфальтированные участки")
+        if ((avoidance and RouteAvoidance.STEPS) != 0 && legs.any { cls(it.e) == 9 })
+            warnings.add("В маршруте остались лестницы")
+        if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && legs.any { isDifficult(it.e) })
+            warnings.add("В маршруте остались тропы с низким качеством покрытия")
         return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist),
-            s.dist, t.dist, preferenceCost)
+            s.dist, t.dist, preferenceCost, warnings)
     }
 
     private fun turnKind(turn: Double): Int {
