@@ -45,7 +45,7 @@ internal class TrackPauseDetector(
             val dt = (timeMs - prior.timeMs) / 1000.0
             val speed = if (dt > 0.0) stepDistance / dt * 3.6 else 0.0
             previous = current
-            if (moved >= maxOf(resumeDistanceM, accuracy * 2.0) &&
+            if (moved >= maxOf(resumeDistanceM, accuracy.coerceAtMost(20.0) * 2.0) &&
                 (speed >= resumeSpeedKmh || moved >= resumeDistanceM * 2.0)) {
                 isPaused = false
                 pauseAnchor = null
@@ -62,7 +62,7 @@ internal class TrackPauseDetector(
             stationarySinceMs = prior.timeMs
         } else {
             val drift = distance(anchor.lat, anchor.lon, lat, lon)
-            val radius = maxOf(stationaryRadiusM, accuracy * 1.5)
+            val radius = maxOf(stationaryRadiusM, accuracy.coerceAtMost(20.0) * 1.5)
             if (drift > radius) {
                 stationaryAnchor = current
                 stationarySinceMs = timeMs
