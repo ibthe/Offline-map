@@ -1811,11 +1811,23 @@ class MainActivity : AppCompatActivity() {
                 android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
+        val category = EditText(this).apply {
+            setText("Общее")
+            hint = "Категория"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val folder = EditText(this).apply {
+            setText("Без папки")
+            hint = "Папка"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val pad = dp(20f)
             setPadding(pad, dp(8f), pad, 0)
             addView(name, LinearLayout.LayoutParams(-1, -2))
+            addView(category, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
+            addView(folder, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4f) })
             addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
         }
         MaterialAlertDialogBuilder(this)
@@ -1823,7 +1835,7 @@ class MainActivity : AppCompatActivity() {
             .setView(content)
             .setPositiveButton("Сохранить") { _, _ ->
                 userDb.addWaypoint(name.text.toString().ifBlank { "Точка" },
-                    ll.latitude, ll.longitude, note.text.toString())
+                    ll.latitude, ll.longitude, note.text.toString(), category.text.toString(), folder.text.toString())
                 refreshWaypoints()
             }
             .setNegativeButton("Отмена", null).show()
@@ -1853,6 +1865,36 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun editWaypointGrouping(waypoint: UserDb.Wpt) {
+        val category = EditText(this).apply {
+            setText(waypoint.category)
+            hint = "Категория"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val folder = EditText(this).apply {
+            setText(waypoint.folder)
+            hint = "Папка"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(20f)
+            setPadding(pad, dp(8f), pad, 0)
+            addView(category, LinearLayout.LayoutParams(-1, -2))
+            addView(folder, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Категория и папка: ${waypoint.name}")
+            .setView(content)
+            .setPositiveButton("Сохранить") { _, _ ->
+                userDb.updateWaypointGrouping(waypoint.id, category.text.toString(), folder.text.toString())
+                refreshWaypoints()
+                toast("Категория и папка сохранены")
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun showWaypoints() {
         val generation = ++listLoadGeneration
         val progress = MaterialAlertDialogBuilder(this).setMessage("Загружаю сохранённые точки…")
@@ -1861,7 +1903,7 @@ class MainActivity : AppCompatActivity() {
         progress.show()
         thread(name = "waypoint-list") {
             val list = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
-            val items = list.map { (if (it.favorite) "★ " else "") + it.name + "\n" + Geo.fmtCoord(it.lat, it.lon) + (if (it.note.isNotBlank()) "\n" + it.note.take(60) else "") }.toTypedArray()
+            val items = list.map { (if (it.favorite) "★ " else "") + it.name + "\n" + Geo.fmtCoord(it.lat, it.lon) + "\n" + it.category + " · " + it.folder + (if (it.note.isNotBlank()) "\n" + it.note.take(60) else "") }.toTypedArray()
             runOnUiThread {
                 if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
                 progress.dismiss()
@@ -1870,13 +1912,14 @@ class MainActivity : AppCompatActivity() {
                     val w = list[i]
                     val favoriteAction = if (w.favorite) "Убрать из избранного" else "В избранное"
                     MaterialAlertDialogBuilder(this).setTitle(w.name)
-                         .setItems(arrayOf("Перейти", "Маршрут сюда", favoriteAction, "Заметка", "Удалить")) { _, a ->
+                          .setItems(arrayOf("Перейти", "Маршрут сюда", favoriteAction, "Заметка", "Категория и папка", "Удалить")) { _, a ->
                             when (a) {
                                 0 -> flyTo(w.lat, w.lon, 15.0)
                                 1 -> setDestination(LatLng(w.lat, w.lon), w.name)
                                 2 -> { userDb.setWaypointFavorite(w.id, !w.favorite); refreshWaypoints(); toast(if (w.favorite) "Убрано из избранного" else "Добавлено в избранное") }
                                 3 -> editWaypointNote(w)
-                                4 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
+                                4 -> editWaypointGrouping(w)
+                                5 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
                             }
                         }.show()
                 }.show()
@@ -2168,6 +2211,7 @@ class MainActivity : AppCompatActivity() {
                     for (w in userDb.waypoints()) {
                         out.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name>")
                         if (w.note.isNotBlank()) out.append("<desc>${esc(w.note)}</desc>")
+                        if (w.category.isNotBlank()) out.append("<type>${esc(w.category)}</type>")
                         if (w.ts > 0L) out.append("<time>${iso.format(Date(w.ts))}</time>")
                         out.append("</wpt>\n")
                     }
@@ -2217,7 +2261,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } ?: error("Не удалось открыть GPX-файл")
                 val waypoints = parsed.waypoints.map {
-                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs, false, it.note)
+                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs, false, it.note, it.category)
                 }
                 val tracks = parsed.tracks.map { track ->
                     UserDb.ImportTrack(track.name, track.points.map { point ->
