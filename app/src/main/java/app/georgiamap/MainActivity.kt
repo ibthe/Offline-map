@@ -1449,7 +1449,7 @@ class MainActivity : AppCompatActivity() {
                         prefs.getBoolean("nav_voice", true)) { on -> prefs.edit().putBoolean("nav_voice", on).apply() },
                     MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() },
                     MenuRow.Link("Предпочтение маршрута", routePreferenceName(routePreference)) { showRoutePreferenceDialog() },
-                    MenuRow.Link("Избегать сложных участков", routeAvoidanceSummary()) { showRouteAvoidanceDialog() },
+                    MenuRow.Link("По возможности избегать", routeAvoidanceSummary()) { showRouteAvoidanceDialog() },
                     MenuRow.Link("Экспедиция и безопасность", "GPS · координаты · запись трека") { showExpeditionPanel() }
                 )),
                 MenuSection("Мои данные", listOf(
@@ -2416,7 +2416,8 @@ class MainActivity : AppCompatActivity() {
         val checked = BooleanArray(flags.size) { i -> (routeAvoidance and flags[i]) != 0 }
         var selected = routeAvoidance
         MaterialAlertDialogBuilder(this)
-            .setTitle("Избегать на маршруте")
+            .setTitle("По возможности избегать")
+            .setMessage("Это предпочтения, а не абсолютные запреты. Если обхода нет, маршрут может включать такие участки и покажет предупреждение.")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
                 selected = if (isChecked) selected or flags[which] else selected and flags[which].inv()
             }
@@ -2456,12 +2457,15 @@ class MainActivity : AppCompatActivity() {
             elevation == null -> " · нет данных рельефа ↗"
             else -> " · профиль высот ↗"
         }
+        val avoidanceWarnings = session?.route?.warnings.orEmpty()
         findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
             " · " + routePreferenceName(routePreference) +
             (if (routeAvoidance != RouteAvoidance.NONE) " · без " + routeAvoidanceSummary() else "") +
             (if (pendingFrom != null) "\nот «$pendingFromName»" else "") +
             (if (navDestName.isNotBlank()) "\n→ $navDestName" else "") +
-            (if (note.isNotEmpty()) "\n$note" else "") + terrainStatus
+            (if (note.isNotEmpty()) "\n$note" else "") +
+            (if (avoidanceWarnings.isNotEmpty()) "\n⚠ " + avoidanceWarnings.joinToString("; ") else "") +
+            terrainStatus
     }
 
     /** When there is no road next to a point, the nearest one is used: say how far it is. */
