@@ -1389,7 +1389,8 @@ class MainActivity : AppCompatActivity() {
                 MenuSection("Навигация", listOf(
                     MenuRow.Toggle("Голосовые подсказки", "Нужен русский голос в системе",
                         prefs.getBoolean("nav_voice", true)) { on -> prefs.edit().putBoolean("nav_voice", on).apply() },
-                    MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() }
+                    MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() },
+                    MenuRow.Link("Экспедиция и безопасность", "GPS · координаты · запись трека") { showExpeditionPanel() }
                 )),
                 MenuSection("Мои данные", listOf(
                     MenuRow.Toggle("Кнопка записи трека",
@@ -1414,6 +1415,88 @@ class MainActivity : AppCompatActivity() {
                 ))
             )
         )
+    }
+
+    private fun showExpeditionPanel() {
+        val location = myLoc
+        val now = System.currentTimeMillis()
+        val hasFreshFix = location != null &&
+            LocationQuality.isFresh(location.time, now, 30_000L) &&
+            location.latitude.isFinite() && location.longitude.isFinite()
+        val coordinates = if (hasFreshFix && location != null) {
+            Geo.fmtCoord(location.latitude, location.longitude)
+        } else "Нет свежих координат GPS"
+        val accuracy = location?.accuracy?.takeIf { it.isFinite() && it > 0f }
+        val ageSeconds = location?.let { ((now - it.time).coerceAtLeast(0L) / 1000L) }
+        val status = if (hasFreshFix) {
+            "Координаты: $coordinates\n" +
+                (accuracy?.let { "Точность: ±${it.roundToInt()} м\n" } ?: "Точность: неизвестна\n") +
+                "Последнее обновление: ${ageSeconds ?: 0} сек. назад"
+        } else {
+            "$coordinates\nВключите GPS и дождитесь актуального местоположения."
+        }
+
+        val density = resources.displayMetrics.density
+        val pad = (18 * density).toInt()
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        content.addView(android.widget.TextView(this).apply {
+            text = status
+            textSize = 16f
+            setTextIsSelectable(true)
+        })
+        content.addView(android.widget.TextView(this).apply {
+            text = "\nПеред выходом:\n• Сохраните маршрут и важные точки\n• Сообщите близким маршрут и время возвращения\n" +
+                "• Проверьте прогноз погоды и местные ограничения дорог/перевалов\n" +
+                "• Возьмите воду, тёплую одежду, аптечку и запас питания\n" +
+                "• Зарядите телефон и возьмите внешний аккумулятор\n" +
+                "• В горах не полагайтесь только на GPS и офлайн-карту\n\n" +
+                "Экстренный номер в Грузии: 112"
+            textSize = 14f
+        })
+
+        fun action(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+            val button = android.widget.Button(this).apply {
+                text = label
+                isEnabled = enabled
+                setOnClickListener { onClick() }
+            }
+            content.addView(button, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+
+        action("Обновить GPS") {
+            withLocationPermission { startLocation(true) }
+        }
+        action("Скопировать координаты", hasFreshFix) {
+            val clip = android.content.ClipData.newPlainText("Координаты", coordinates)
+            (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(clip)
+            toast("Координаты скопированы")
+        }
+        action("Поделиться координатами", hasFreshFix) {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, coordinates)
+            }, "Поделиться координатами"))
+        }
+        action(if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) "Остановить запись трека" else "Начать запись трека") {
+            toggleRecording()
+        }
+        action("Экстренный вызов 112") {
+            try {
+                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112")))
+            } catch (_: Exception) {
+                toast("Не удалось открыть приложение телефона")
+            }
+        }
+
+        val scroll = android.widget.ScrollView(this).apply { addView(content) }
+        MaterialAlertDialogBuilder(this).setTitle("Экспедиция и безопасность")
+            .setView(scroll).setPositiveButton("Закрыть", null).show()
     }
 
     private fun showLanguageDialog() {
