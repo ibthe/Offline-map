@@ -1817,19 +1817,21 @@ class MainActivity : AppCompatActivity() {
         progress.show()
         thread(name = "waypoint-list") {
             val list = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
-            val items = list.map { "${it.name}\n${Geo.fmtCoord(it.lat, it.lon)}" }.toTypedArray()
+            val items = list.map { (if (it.favorite) "★ " else "") + it.name + "\n" + Geo.fmtCoord(it.lat, it.lon) }.toTypedArray()
             runOnUiThread {
                 if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
                 progress.dismiss()
                 if (list.isEmpty()) { toast("Точек нет. Долгое нажатие на карту или кнопка «Точка»"); return@runOnUiThread }
                 MaterialAlertDialogBuilder(this).setTitle("Мои точки").setItems(items) { _, i ->
                     val w = list[i]
+                    val favoriteAction = if (w.favorite) "Убрать из избранного" else "В избранное"
                     MaterialAlertDialogBuilder(this).setTitle(w.name)
-                        .setItems(arrayOf("Перейти", "Маршрут сюда", "Удалить")) { _, a ->
+                        .setItems(arrayOf("Перейти", "Маршрут сюда", favoriteAction, "Удалить")) { _, a ->
                             when (a) {
                                 0 -> flyTo(w.lat, w.lon, 15.0)
                                 1 -> setDestination(LatLng(w.lat, w.lon), w.name)
-                                else -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
+                                2 -> { userDb.setWaypointFavorite(w.id, !w.favorite); refreshWaypoints(); showWaypoints() }
+                                3 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
                             }
                         }.show()
                 }.show()
