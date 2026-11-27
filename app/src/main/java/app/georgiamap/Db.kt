@@ -224,25 +224,35 @@ class PlaceDb(path: String) {
         if (safeKinds.isEmpty()) return emptyList()
         val args = safeKinds.toTypedArray()
         val placeholders = safeKinds.joinToString(",") { "?" }
-        val candidates = ArrayList<NearbyPlace>()
+        val maxResults = limit.coerceIn(1, 50)
+        val nearest = java.util.PriorityQueue<NearbyPlace>(
+            maxResults, compareByDescending<NearbyPlace> { it.distanceM }
+        )
+        val p1 = Math.toRadians(lat)
         db.rawQuery(
-            "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where kind in ($placeholders) limit 10000",
+            "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where kind in ($placeholders)",
             args
         ).use { c ->
             while (c.moveToNext()) {
                 val place = Place(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "",
                     c.getString(3) ?: "", c.getDouble(4), c.getDouble(5), c.getInt(6))
-                val p1 = Math.toRadians(lat)
                 val p2 = Math.toRadians(place.lat)
                 val dp = p2 - p1
                 val dl = Math.toRadians(place.lon - lon)
                 val h = sin(dp / 2) * sin(dp / 2) +
                     cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
                 val distance = 2.0 * 6_371_008.8 * asin(sqrt(h.coerceIn(0.0, 1.0)))
-                if (distance.isFinite()) candidates.add(NearbyPlace(place, distance))
+                if (distance.isFinite()) {
+                    val item = NearbyPlace(place, distance)
+                    if (nearest.size < maxResults) nearest.add(item)
+                    else if (distance < nearest.peek().distanceM) {
+                        nearest.poll()
+                        nearest.add(item)
+                    }
+                }
             }
         }
-        return candidates.sortedBy { it.distanceM }.take(limit.coerceIn(1, 50))
+        return nearest.sortedBy { it.distanceM }
     }
 
     @Synchronized
