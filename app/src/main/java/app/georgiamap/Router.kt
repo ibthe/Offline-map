@@ -214,7 +214,7 @@ class RoadGraph(buf: ByteBuffer) {
     private fun isUnpaved(e: Int) = (eFlags[e] shr 19) and 1 == 1
     private fun trackGrade(e: Int) = (eFlags[e] shr 20) and 7
     private fun smoothness(e: Int) = (eFlags[e] shr 23) and 7
-    private fun isToll(e: Int) = (eFlags[e] shr 26) and 1 == 1
+    private fun isToll(e: Int) = ((eFlags[e] ushr 26) and 1) == 1
     private fun isDifficult(e: Int) = trackGrade(e) >= 4 || smoothness(e) >= 4
 
     private fun avoidancePenalty(e: Int, avoidance: Int): Double {
