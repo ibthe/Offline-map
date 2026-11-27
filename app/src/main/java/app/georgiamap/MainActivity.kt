@@ -182,6 +182,11 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) readGpx(uri)
         }
 
+    private val mapPackageImportLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importMapPackage(uri)
+        }
+
     // ============================================================ lifecycle
 
     /** Seven colour themes. Each one has a UI overlay (res/values/palettes.xml) and its own map style file. */
@@ -262,7 +267,7 @@ class MainActivity : AppCompatActivity() {
         setupEdgeToEdge()
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        mapPackage = MapPackages.resolve(prefs.getString("map_package_id", MapPackages.DEFAULT_ID) ?: MapPackages.DEFAULT_ID)
+        mapPackage = MapPackages.resolve(prefs.getString("map_package_id", MapPackages.DEFAULT_ID) ?: MapPackages.DEFAULT_ID, filesDir)
         locationRequestedByUser = prefs.getBoolean("location_user_enabled", false)
         following = prefs.getBoolean("location_follow", locationRequestedByUser)
         locActive = locationRequestedByUser
@@ -420,11 +425,11 @@ class MainActivity : AppCompatActivity() {
         }
         prepareData {
             val dir = filesDir
-            tilesFile = File(dir, mapPackage.tilesAsset)
-            mapPackage.placesAsset?.let { File(dir, it) }?.takeIf { it.exists() }?.let {
+            tilesFile = mapPackage.file(dir, mapPackage.tilesAsset)
+            mapPackage.placesAsset?.let { mapPackage.file(dir, it) }?.takeIf { it.exists() }?.let {
                 placeDb = try { PlaceDb(it.absolutePath) } catch (e: Exception) { errors.add("places: $e"); null }
             }
-            mapPackage.reliefAsset?.let { File(dir, it) }?.takeIf { it.exists() }?.let {
+            mapPackage.reliefAsset?.let { mapPackage.file(dir, it) }?.takeIf { it.exists() }?.let {
                 elevation = try { Elevation(it.absolutePath) } catch (e: Exception) { errors.add("relief: $e"); null }
             }
             if (restoredSearch.isNotEmpty()) etSearch.setText(restoredSearch)
@@ -566,6 +571,15 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ data (assets -> files)
 
     private fun prepareData(onReady: () -> Unit) {
+        if (mapPackage.directory != null) {
+            if (!MapPackageInstaller.validateInstalled(mapPackage, filesDir)) {
+                loading.visibility = View.VISIBLE
+                loadingText.text = "Пакет «${mapPackage.title}» повреждён или содержит неполные данные"
+                return
+            }
+            onReady()
+            return
+        }
         val have = assets.list("")?.toSet() ?: emptySet()
         if (mapPackage.tilesAsset !in have) {
             loading.visibility = View.VISIBLE
@@ -717,8 +731,8 @@ class MainActivity : AppCompatActivity() {
         val m = map ?: return
         val tiles = tilesFile ?: return
         val name = "style_${palette().key}" + (if (isNight()) "_dark" else "") + ".json"
-        val relief = mapPackage.reliefAsset?.let { File(filesDir, it) }
-        val contours = mapPackage.contoursAsset?.let { File(filesDir, it) }
+        val relief = mapPackage.reliefAsset?.let { mapPackage.file(filesDir, it) }
+        val contours = mapPackage.contoursAsset?.let { mapPackage.file(filesDir, it) }
         val obj = JSONObject(assets.open(name).bufferedReader().use { it.readText() })
         // optional data: without the file its source and layers are dropped, so the style still loads
         if (relief?.exists() != true) dropFromStyle(obj, listOf("relief")) { it == "relief-hillshade" }
@@ -1362,8 +1376,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMenu() {
         val langs = enabledLanguages().joinToString(" · ") { it.name }.ifEmpty { "выкл" }
-        val hasRelief = mapPackage.reliefAsset?.let { File(filesDir, it).exists() } == true
-        val hasContours = mapPackage.contoursAsset?.let { File(filesDir, it).exists() } == true
+        val hasRelief = mapPackage.reliefAsset?.let { mapPackage.file(filesDir, it).exists() } == true
+        val hasContours = mapPackage.contoursAsset?.let { mapPackage.file(filesDir, it).exists() } == true
         val recordBusy = TrackService.running || prefs.getLong("rec_track", 0L) > 0L
         val modeName = when (themeMode()) { "light" -> "светлый"; "dark" -> "тёмный"; "twilight" -> "сумерки"; else -> "авто" }
         MenuUi.show(
@@ -1382,6 +1396,7 @@ class MainActivity : AppCompatActivity() {
             ),
             listOf(
                 MenuSection("Карта", listOf(
+                    MenuRow.Link("Пакеты карт", "${MapPackages.all(filesDir).size} установлено") { showMapPackages() },
                     MenuRow.Link("Языки названий", langs) { showLanguageDialog() },
                     MenuRow.Link("Перейти к координатам") { gotoCoordinatesDialog() },
                     MenuRow.Toggle("Рельеф", if (hasRelief) "Тени гор на карте" else "Нет данных в APK",
@@ -1428,6 +1443,61 @@ class MainActivity : AppCompatActivity() {
                 ))
             )
         )
+    }
+
+    private fun showMapPackages() {
+        val packages = MapPackages.all(filesDir)
+        val labels = packages.map { pack ->
+            (if (pack.id == mapPackage.id) "✓ " else "") + pack.title + " · " + pack.countryCode
+        }.toTypedArray()
+        MaterialAlertDialogBuilder(this).setTitle("Пакеты офлайн-карт")
+            .setItems(labels) { _, index ->
+                val selected = packages[index]
+                if (selected.id == mapPackage.id) {
+                    toast("Уже выбрана карта «${selected.title}»")
+                } else {
+                    prefs.edit().putString("map_package_id", selected.id).apply()
+                    recreate()
+                }
+            }
+            .setNeutralButton("Импортировать .gmap") { _, _ ->
+                mapPackageImportLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun importMapPackage(uri: Uri) {
+        loadingText.text = "Устанавливаю пакет карты…"
+        loading.visibility = View.VISIBLE
+        thread(name = "map-package-import") {
+            try {
+                val pack = contentResolver.openInputStream(uri)?.use { input ->
+                    MapPackageInstaller.install(input, filesDir)
+                } ?: error("Не удалось открыть архив пакета")
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        MaterialAlertDialogBuilder(this)
+                            .setTitle("Пакет установлен")
+                            .setMessage("«${pack.title}» добавлен. Переключить карту сейчас?")
+                            .setPositiveButton("Переключить") { _, _ ->
+                                prefs.edit().putString("map_package_id", pack.id).apply()
+                                recreate()
+                            }
+                            .setNegativeButton("Позже", null)
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        toast("Не удалось установить пакет: ${e.message}")
+                    }
+                }
+            }
+        }
     }
 
     private fun showExpeditionPanel() {
@@ -2331,7 +2401,7 @@ class MainActivity : AppCompatActivity() {
         done: (fastest: RouteResult?, shortest: RouteResult?, error: String?) -> Unit
     ) {
         val requestId = ++routeRequestId
-        val f = mapPackage.routingAsset?.let { File(filesDir, it) }
+        val f = mapPackage.routingAsset?.let { mapPackage.file(filesDir, it) }
         if (f == null || !f.isFile) {
             if (requestId == routeRequestId) done(null, null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
             return
