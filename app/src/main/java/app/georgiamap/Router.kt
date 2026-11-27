@@ -139,6 +139,7 @@ class RoadGraph(buf: ByteBuffer) {
         }
 
         const val M_LAT = 110574.0
+        const val SNAP_ALTERNATIVE_TOLERANCE_M = 40.0
         fun mLon(latDeg: Double) = 111320.0 * cos(Math.toRadians(latDeg))
     }
 
@@ -317,8 +318,16 @@ class RoadGraph(buf: ByteBuffer) {
         val ts = snapK(toLat, toLon, p, 4)
         if (ss.isEmpty() || ts.isEmpty()) return null
 
+        // Keep alternatives near the closest usable road. Without this bound, the
+        // router could silently jump from a disconnected road/path to a different
+        // component several hundred metres away using a fictitious straight connector.
+        val sLimit = ss.first().dist + SNAP_ALTERNATIVE_TOLERANCE_M
+        val tLimit = ts.first().dist + SNAP_ALTERNATIVE_TOLERANCE_M
+        val startCandidates = ss.filter { it.dist <= sLimit }
+        val endCandidates = ts.filter { it.dist <= tLimit }
+
         val pairs = ArrayList<Pair<Snap, Snap>>()
-        for (a in ss) for (b in ts) pairs.add(a to b)
+        for (a in startCandidates) for (b in endCandidates) pairs.add(a to b)
         pairs.sortBy { it.first.dist + it.second.dist }
 
         // Evaluate every candidate pair. The closest pair of roads is not necessarily
