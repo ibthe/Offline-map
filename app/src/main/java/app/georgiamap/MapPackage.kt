@@ -26,6 +26,9 @@ data class MapBounds(
     fun contains(lat: Double, lon: Double) =
         lat in south..north && lon in west..east
 
+    val centerLat: Double get() = (south + north) / 2.0
+    val centerLon: Double get() = (west + east) / 2.0
+
     fun toLatLngBounds() = LatLngBounds.from(north, east, south, west)
 }
 

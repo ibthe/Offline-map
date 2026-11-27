@@ -267,6 +267,10 @@ class MainActivity : AppCompatActivity() {
         setupEdgeToEdge()
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (prefs.getBoolean("reset_map_camera", false)) {
+            hasSavedMapState = false
+            prefs.edit().remove("reset_map_camera").apply()
+        }
         mapPackage = MapPackages.resolve(prefs.getString("map_package_id", MapPackages.DEFAULT_ID) ?: MapPackages.DEFAULT_ID, filesDir)
         locationRequestedByUser = prefs.getBoolean("location_user_enabled", false)
         following = prefs.getBoolean("location_follow", locationRequestedByUser)
@@ -691,11 +695,29 @@ class MainActivity : AppCompatActivity() {
         m.setMinZoomPreference(4.0)
         m.setMaxZoomPreference(18.0)
         if (!hasSavedMapState) {
-            m.moveCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder().target(LatLng(42.2, 43.5)).zoom(6.6).build()
+            if (mapPackage.id == MapPackages.DEFAULT_ID) {
+                m.moveCamera(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder().target(LatLng(42.2, 43.5)).zoom(6.6).build()
+                    )
                 )
-            )
+            } else {
+                // A saved camera from the previous region can be outside the newly selected map.
+                // Fit the selected package on first launch and after an explicit region switch.
+                findViewById<View>(R.id.root).post {
+                    if (isFinishing || isDestroyed || map !== m) return@post
+                    try {
+                        val p = mapViewportPadding()
+                        m.moveCamera(CameraUpdateFactory.newLatLngBounds(
+                            mapPackage.bounds.toLatLngBounds(), p[0], p[1], p[2], p[3]
+                        ))
+                    } catch (_: Exception) {
+                        m.moveCamera(CameraUpdateFactory.newLatLngZoom(
+                            LatLng(mapPackage.bounds.centerLat, mapPackage.bounds.centerLon), 5.5
+                        ))
+                    }
+                }
+            }
         }
         if (following) myLoc?.let {
             m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), maxOf(m.cameraPosition.zoom, 14.0)))
@@ -1470,7 +1492,8 @@ class MainActivity : AppCompatActivity() {
     private fun selectMapPackage(selected: MapPackage) {
         fun applySelection() {
             if (navMode != NavMode.IDLE) stopNav()
-            prefs.edit().putString("map_package_id", selected.id).apply()
+            prefs.edit().putString("map_package_id", selected.id)
+                .putBoolean("reset_map_camera", true).apply()
             recreate()
         }
         if (navMode != NavMode.IDLE) {

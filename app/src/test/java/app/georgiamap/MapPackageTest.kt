@@ -23,6 +23,13 @@ class MapPackageTest {
     }
 
     @Test
+    fun regionalBoundsExposeTheirOwnCenterForInitialCamera() {
+        val bounds = MapBounds(38.8, 43.4, 41.3, 46.7)
+        assertEquals(40.05, bounds.centerLat, 0.000001)
+        assertEquals(45.05, bounds.centerLon, 0.000001)
+    }
+
+    @Test
     fun unknownPackageFallsBackToDefaultWithoutNullAssets() {
         val pack = MapPackages.resolve("missing-region")
         assertEquals(MapPackages.GEORGIA, pack)
