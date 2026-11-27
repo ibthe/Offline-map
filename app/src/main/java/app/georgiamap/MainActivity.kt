@@ -1598,10 +1598,14 @@ class MainActivity : AppCompatActivity() {
             val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
             val items = try {
                 list.map { track ->
-                    val len = userDb.trackSegments(track.id).sumOf { segment ->
-                        Geo.length(segment.map { p -> LatLng(p.lat, p.lon) })
-                    }
-                    "${track.name}\n${fmt.format(Date(track.start))} · ${track.count} точек · ${Geo.fmtDist(len)}"
+                    val segments = userDb.trackSegments(track.id)
+                    val stats = TrackStats.calculate(segments.map { segment ->
+                        segment.map { p -> TrackStats.Sample(p.lat, p.lon, p.ele, p.ts) }
+                    })
+                    val elevation = if (stats.elevationSamples > 1) {
+                        " · ↑${stats.ascentM.roundToInt()} м ↓${stats.descentM.roundToInt()} м"
+                    } else ""
+                    "${track.name}\n${fmt.format(Date(track.start))} · ${track.count} точек · ${Geo.fmtDist(stats.distanceM)}${elevation}"
                 }.toTypedArray()
             } catch (_: Exception) { emptyArray() }
             runOnUiThread {
@@ -1611,11 +1615,12 @@ class MainActivity : AppCompatActivity() {
                 MaterialAlertDialogBuilder(this).setTitle("Мои треки").setItems(items) { _, i ->
                     val t = list[i]
                     MaterialAlertDialogBuilder(this).setTitle(t.name)
-                        .setItems(arrayOf("Показать на карте", "Скрыть", "Удалить")) { _, a ->
+                        .setItems(arrayOf("Показать на карте", "Скрыть", "Статистика", "Удалить")) { _, a ->
                             when (a) {
                                 0 -> { shownTrackId = t.id; prefs.edit().putLong("shown_track", t.id).apply(); refreshTrack(); fitTrack(t.id) }
                                 1 -> { if (shownTrackId == t.id) { shownTrackId = -1L; prefs.edit().putLong("shown_track", -1L).apply() }; refreshTrack() }
-                                2 -> {
+                                2 -> showTrackStats(t)
+                                3 -> {
                                     if (prefs.getLong("rec_track", 0L) == t.id) {
                                         toast("Сначала остановите запись")
                                     } else {
@@ -1657,6 +1662,42 @@ class MainActivity : AppCompatActivity() {
             dp(48f),
             insetBottom + dp(16f) + bottomPanel.height + dp(16f)
         )
+    }
+
+    private fun showTrackStats(track: UserDb.Track) {
+        val generation = ++listLoadGeneration
+        loadingText.text = "Считаю статистику трека…"
+        loading.visibility = View.VISIBLE
+        thread(name = "track-stats") {
+            val segments = try { userDb.trackSegments(track.id) } catch (_: Exception) { emptyList() }
+            val stats = TrackStats.calculate(segments.map { segment ->
+                segment.map { p -> TrackStats.Sample(p.lat, p.lon, p.ele, p.ts) }
+            })
+            val duration = fun(ms: Long): String {
+                val totalMinutes = (ms / 60_000L).coerceAtLeast(0L)
+                val hours = totalMinutes / 60
+                val minutes = totalMinutes % 60
+                return if (hours > 0) "${hours} ч ${minutes} мин" else "${minutes} мин"
+            }
+            val message = buildString {
+                append("Расстояние: ").append(Geo.fmtDist(stats.distanceM)).append('\n')
+                append("Точек: ").append(stats.pointCount).append('\n')
+                if (stats.elapsedMs > 0L) append("Общее время: ").append(duration(stats.elapsedMs)).append('\n')
+                if (stats.movingMs > 0L) append("Время в движении: ").append(duration(stats.movingMs)).append('\n')
+                if (stats.elevationSamples > 1) {
+                    append("Набор высоты: +").append(stats.ascentM.roundToInt()).append(" м\n")
+                    append("Сброс высоты: −").append(stats.descentM.roundToInt()).append(" м\n")
+                } else append("Высота: нет данных\n")
+                if (stats.averageSpeedKmh > 0.0) append("Средняя скорость: ").append(String.format(Locale.getDefault(), "%.1f км/ч", stats.averageSpeedKmh)).append('\n')
+                if (stats.maxSpeedKmh > 0.0) append("Максимальная скорость: ").append(String.format(Locale.getDefault(), "%.1f км/ч", stats.maxSpeedKmh))
+            }
+            runOnUiThread {
+                if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                loading.visibility = View.GONE
+                MaterialAlertDialogBuilder(this).setTitle("Статистика: ${track.name}")
+                    .setMessage(message).setPositiveButton("OK", null).show()
+            }
+        }
     }
 
     private fun fitTrack(id: Long) {
