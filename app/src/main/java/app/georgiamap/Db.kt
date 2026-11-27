@@ -157,6 +157,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 6) {
                     put("ts", w.ts.coerceAtLeast(0L))
                     put("note", w.note.take(2_000))
                     put("category", w.category.take(100))
+                    put("folder", w.folder.take(100).ifBlank { "Без папки" })
                 }
                 db.insertOrThrow("waypoints", null, v)
             }
