@@ -38,7 +38,7 @@ def create_package(args) -> Path:
     if not args.title or len(args.title) > 80 or any(ch in args.title for ch in "\r\n="):
         raise ValueError("Title must contain 1-80 characters and cannot contain newlines or '='")
     emergency_number = getattr(args, "emergency_number", None)
-    if emergency_number and not re.fullmatch(r"\\+?[0-9*#]{2,8}", emergency_number):
+    if emergency_number and not re.fullmatch(r"\+?[0-9*#]{2,8}", emergency_number):
         raise ValueError("Emergency number must contain 2-8 digits, '*' or '#' (optional leading +)")
 
     selected = []
