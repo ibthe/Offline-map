@@ -45,7 +45,7 @@ class TrackService : Service() {
     private var batteryReceiverRegistered = false
     private var batteryLow = false
     private var autoPaused = false
-    private val pauseDetector = TrackPauseDetector()
+    private var pauseDetector = TrackPauseDetector()
 
     private val batteryReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
@@ -173,7 +173,9 @@ class TrackService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (running) return START_STICKY
         if (db == null) db = UserDb(this)
-        trackId = getSharedPreferences("settings", MODE_PRIVATE).getLong("rec_track", 0L)
+        val settings = getSharedPreferences("settings", MODE_PRIVATE)
+        trackId = settings.getLong("rec_track", 0L)
+        pauseDetector = TrackPauseDetector(enabled = settings.getBoolean("track_auto_pause", true))
         db?.lastTrackPoint(trackId)?.let { last ->
             lastRecordedLocationTime = last.ts
             lastAcceptedLocationTime = last.ts
