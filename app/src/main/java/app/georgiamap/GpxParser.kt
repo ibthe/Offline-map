@@ -14,7 +14,7 @@ import javax.xml.parsers.SAXParserFactory
 
 /** Streaming, bounded and XXE-safe GPX 1.1 parser. No Android dependencies: safe to regression-test on the JVM. */
 object GpxParser {
-    data class Waypoint(val name: String, val lat: Double, val lon: Double, val timestampMs: Long, val note: String = "")
+    data class Waypoint(val name: String, val lat: Double, val lon: Double, val timestampMs: Long, val note: String = "", val category: String = "Общее")
     data class Point(
         val lat: Double, val lon: Double, val elevationM: Double,
         val timestampMs: Long, val segment: Int
@@ -40,6 +40,7 @@ object GpxParser {
             private var waypointLon = 0.0
             private var waypointName = ""
             private var waypointNote = ""
+            private var waypointCategory = "Общее"
             private var waypointTime = 0L
             private var lat = 0.0
             private var lon = 0.0
@@ -76,6 +77,7 @@ object GpxParser {
                         inWaypoint = true
                         waypointName = ""
                         waypointNote = ""
+                        waypointCategory = "Общее"
                         waypointTime = 0L
                         waypointLat = coordinate(attrs, "lat", "wpt")
                         waypointLon = coordinate(attrs, "lon", "wpt")
@@ -107,6 +109,10 @@ object GpxParser {
                         textTag = "wpt-note"
                         text.setLength(0)
                     }
+                    "type" -> if (inWaypoint) {
+                        textTag = "wpt-category"
+                        text.setLength(0)
+                    }
                     "ele" -> if (pointTag.isNotEmpty()) {
                         textTag = "ele"
                         text.setLength(0)
@@ -133,14 +139,15 @@ object GpxParser {
                     when (textTag) {
                         "wpt-name" -> waypointName = value.take(200)
                         "wpt-note" -> waypointNote = value.take(2_000)
+                        "wpt-category" -> waypointCategory = value.take(100).ifBlank { "Общее" }
                         "track-name" -> trackName = value.take(200)
                         "ele" -> elevation = value.toDoubleOrNull()?.takeIf { it.isFinite() } ?: Double.NaN
                         "wpt-time" -> waypointTime = parseTime(value)
                         "point-time" -> timestamp = parseTime(value)
                     }
                     if ((textTag == "wpt-name" || textTag == "track-name" || textTag == "ele" ||
-                        textTag == "wpt-time" || textTag == "point-time" || textTag == "wpt-note") &&
-                        name in setOf("name", "ele", "time", "desc", "cmt")) {
+                        textTag == "wpt-time" || textTag == "point-time" || textTag == "wpt-note" || textTag == "wpt-category") &&
+                        name in setOf("name", "ele", "time", "desc", "cmt", "type")) {
                         textTag = ""
                         text.setLength(0)
                     }
@@ -149,7 +156,7 @@ object GpxParser {
                     "wpt" -> {
                         if (waypoints.size >= MAX_WAYPOINTS) throw SAXException("Слишком много точек в GPX (лимит $MAX_WAYPOINTS)")
                         waypoints.add(Waypoint(waypointName.ifBlank { "Точка ${waypoints.size + 1}" },
-                            waypointLat, waypointLon, waypointTime, waypointNote))
+                            waypointLat, waypointLon, waypointTime, waypointNote, waypointCategory))
                         inWaypoint = false
                     }
                     "trkpt", "rtept" -> if (pointTag == name) {
