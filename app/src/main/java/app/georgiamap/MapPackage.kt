@@ -231,7 +231,7 @@ object MapPackageInstaller {
         pack.placesAsset?.let { name ->
             inspect(name, mapOf(
                 "places" to setOf("id", "ka", "ru", "en", "kind", "lat", "lon", "s"),
-                "places_fts" to setOf("ka", "ru", "en", "s")
+                "places_fts" to setOf("s")
             ), setOf("places", "places_fts"))
         }
         pack.reliefAsset?.let { inspect(it, mapOf("tiles" to setOf("zoom_level", "tile_column", "tile_row", "tile_data")), setOf("tiles")) }
