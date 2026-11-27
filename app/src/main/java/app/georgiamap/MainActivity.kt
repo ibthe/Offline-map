@@ -705,7 +705,7 @@ class MainActivity : AppCompatActivity() {
                 // A saved camera from the previous region can be outside the newly selected map.
                 // Fit the selected package on first launch and after an explicit region switch.
                 findViewById<View>(R.id.root).post {
-                    if (isFinishing || isDestroyed || map !== m) return@post
+                    if (isFinishing || isDestroyed || map !== m || (following && myLoc != null)) return@post
                     try {
                         val p = mapViewportPadding()
                         m.moveCamera(CameraUpdateFactory.newLatLngBounds(
