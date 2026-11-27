@@ -35,6 +35,17 @@ class TrackGeometryTest {
     }
 
     @Test
+    fun simplifiesHundredThousandPointTrackWithBoundedOutput() {
+        val points = (0 until 100_000).map {
+            TrackGeometry.Point(41.0 + it * 0.000001, 44.0)
+        }
+        val simplified = TrackGeometry.simplify(points, 1.0)
+        assertEquals(points.first(), simplified.first())
+        assertEquals(points.last(), simplified.last())
+        assertTrue(simplified.size <= 2)
+    }
+
+    @Test
     fun invalidToleranceLeavesOriginalPoints() {
         val points = listOf(TrackGeometry.Point(41.0, 44.0), TrackGeometry.Point(41.1, 44.1))
         assertEquals(points, TrackGeometry.simplify(points, Double.NaN))
