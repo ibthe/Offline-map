@@ -1525,6 +1525,7 @@ class MainActivity : AppCompatActivity() {
                     MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() },
                     MenuRow.Link("Предпочтение маршрута", routePreferenceName(routePreference)) { showRoutePreferenceDialog() },
                     MenuRow.Link("По возможности избегать", routeAvoidanceSummary()) { showRouteAvoidanceDialog() },
+                    MenuRow.Link("Автопауза записи трека", trackAutoPauseSummary()) { showTrackAutoPauseDialog() },
                     MenuRow.Link("Экспедиция и безопасность", "GPS · координаты · запись трека") { showExpeditionPanel() }
                 )),
                 MenuSection("Мои данные", listOf(
@@ -2472,6 +2473,23 @@ class MainActivity : AppCompatActivity() {
                 if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
             }
             .setNegativeButton("Закрыть", null).show()
+    }
+
+    private fun trackAutoPauseSummary(): String =
+        if (prefs.getBoolean("track_auto_pause", true)) "Включена" else "Выключена"
+
+    private fun showTrackAutoPauseDialog() {
+        val enabled = prefs.getBoolean("track_auto_pause", true)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Автопауза записи трека")
+            .setMessage("При стоянке примерно от 2 минут запись приостанавливается. При возобновлении движения создаётся новый сегмент, чтобы GPS-дрейф не добавлял ложное расстояние. Настройка действует для следующей записи.")
+            .setSingleChoiceItems(arrayOf("Включена", "Выключена"), if (enabled) 0 else 1) { dialog, which ->
+                prefs.edit().putBoolean("track_auto_pause", which == 0).apply()
+                dialog.dismiss()
+                toast(if (which == 0) "Автопауза включена для следующей записи" else "Автопауза выключена для следующей записи")
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     private fun routeAvoidanceSummary(): String {
