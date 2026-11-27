@@ -5,6 +5,7 @@ import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -96,7 +97,7 @@ object RouteAnalysis {
             a.distanceM.isFinite() && b.distanceM.isFinite() && b.distanceM >= a.distanceM
         })
         val valid = samples.mapNotNull { s -> s.elevationM?.takeIf { it.isFinite() } }
-        val coverage = if (samples.isEmpty()) 0 else (valid.size * 100.0 / samples.size).toInt()
+        val coverage = if (samples.isEmpty()) 0 else (valid.size * 100.0 / samples.size).roundToInt()
         if (valid.size < 2) {
             return Result(distanceM, valid.minOrNull(), valid.maxOrNull(), 0.0, 0.0,
                 null, null, coverage, samples.toList(), emptyList(), Difficulty.UNKNOWN)
