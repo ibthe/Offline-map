@@ -141,6 +141,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 5) {
                 val v = ContentValues().apply {
                     put("name", w.name); put("lat", w.lat); put("lon", w.lon)
                     put("ts", w.ts.coerceAtLeast(0L))
+                    put("note", w.note.take(2_000))
                 }
                 db.insertOrThrow("waypoints", null, v)
             }
