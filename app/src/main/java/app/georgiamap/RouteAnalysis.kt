@@ -102,13 +102,10 @@ object RouteAnalysis {
                 null, null, coverage, samples.toList(), emptyList(), Difficulty.UNKNOWN)
         }
 
-        // A three-point median suppresses isolated DEM pixel noise without hiding sustained slopes.
-        val smooth = samples.mapIndexed { i, s ->
-            val window = (max(0, i - 1)..min(samples.lastIndex, i + 1))
-                .mapNotNull { samples[it].elevationM?.takeIf { h -> h.isFinite() } }
-                .sorted()
-            val median = if (window.isEmpty()) null else window[window.size / 2]
-            Sample(s.distanceM, median)
+        // Route samples are already spaced (normally 100 m), which reduces pixel noise
+        // while retaining short steep sections that a broad median filter could erase.
+        val smooth = samples.map { s ->
+            Sample(s.distanceM, s.elevationM?.takeIf { it.isFinite() })
         }
 
         var ascent = 0.0
