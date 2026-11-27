@@ -168,7 +168,7 @@ object RouteAnalysis {
 
         val ascentPerKm = if (distanceM > 0.0) ascent / (distanceM / 1000.0) else 0.0
         val difficulty = when {
-            coverage < 60 -> Difficulty.UNKNOWN
+            coverage < 80 -> Difficulty.UNKNOWN
             ascentPerKm >= 100.0 || maxUp >= 25.0 || maxDown >= 30.0 -> Difficulty.HARD
             ascentPerKm >= 50.0 || maxUp >= 15.0 || maxDown >= 20.0 -> Difficulty.MODERATE
             else -> Difficulty.EASY
