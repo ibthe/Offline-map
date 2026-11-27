@@ -228,7 +228,6 @@ jobs:
       # Road graph for the offline navigator (car / foot / bike). Optional: without it the app simply has no routing.
       - name: Build road graph for the navigator
         if: steps.need.outputs.routing == 'true'
-        continue-on-error: true
         run: |
           rm -f app/src/main/assets/routing.bin
           python -m pip install --quiet osmium numpy
@@ -237,7 +236,6 @@ jobs:
 
       - name: Build relief tiles (hillshade + elevation readout)
         if: steps.need.outputs.relief == 'true'
-        continue-on-error: true
         working-directory: tools
         run: |
           rm -f ../app/src/main/assets/relief.mbtiles
@@ -248,7 +246,6 @@ jobs:
       # file the app simply has no contour lines (peak marks still work).
       - name: Build contour lines
         if: steps.need.outputs.contours == 'true'
-        continue-on-error: true
         working-directory: tools
         run: |
           rm -f ../app/src/main/assets/contours.mbtiles
@@ -269,10 +266,11 @@ jobs:
               contours) path=app/src/main/assets/contours.mbtiles ;;
               routing) path=app/src/main/assets/routing.bin ;;
             esac
-            if [ -s "$path" ] && ! python tools/check_cached_assets.py "$kind" "$path"; then
-              echo "::warning::$kind asset failed validation and will be omitted from this APK"
-              rm -f "$path"
+            if [ ! -s "$path" ]; then
+              echo "::error::Required $kind asset is missing; refusing to package an incomplete offline navigator"
+              exit 1
             fi
+            python tools/check_cached_assets.py "$kind" "$path"
           done
 
       - name: Mark rebuilt assets ready for cache
