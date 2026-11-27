@@ -23,7 +23,7 @@ class MapPackageBuilderTests(unittest.TestCase):
         values = dict(
             id="armenia", title="Армения", country_code="AM",
             bounds=[38.8, 43.4, 41.3, 46.7], tiles=str(self.tiles),
-            places=None, relief=None, contours=None, routing=str(self.routing),
+            places=None, relief=None, contours=None, routing=str(self.routing), emergency_number=None,
             output=str(self.root / "armenia.gmap")
         )
         values.update(overrides)
@@ -51,6 +51,14 @@ class MapPackageBuilderTests(unittest.TestCase):
             manifest = archive.read("package.properties").decode("utf-8")
             self.assertIn("relief=relief.mbtiles", manifest)
             self.assertIn("contours=contours.mbtiles", manifest)
+
+    def test_writes_valid_emergency_number_and_rejects_invalid_value(self):
+        output = create_package(self.args(emergency_number="+112"))
+        with zipfile.ZipFile(output) as archive:
+            manifest = archive.read("package.properties").decode("utf-8")
+            self.assertIn("emergencyNumber=+112", manifest)
+        with self.assertRaises(ValueError):
+            create_package(self.args(emergency_number="call-112"))
 
     def test_rejects_invalid_bounds_and_ids(self):
         with self.assertRaises(ValueError):
