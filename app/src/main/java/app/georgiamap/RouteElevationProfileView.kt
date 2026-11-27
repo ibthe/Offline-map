@@ -37,7 +37,7 @@ class RouteElevationProfileView @JvmOverloads constructor(
     private var totalDistance = 1.0
 
     fun setProfile(result: RouteAnalysis.Result) {
-        samples = result.samples.filter { it.elevationM?.isFinite() == true }
+        samples = result.samples
         minElevation = result.minElevationM ?: 0.0
         maxElevation = result.maxElevationM ?: (minElevation + 1.0)
         if (maxElevation - minElevation < 1.0) {
