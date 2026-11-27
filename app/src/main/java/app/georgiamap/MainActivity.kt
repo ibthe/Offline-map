@@ -134,6 +134,21 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var compass: CompassController
     private var myLoc: Location? = null
+    private var waypointCache: List<UserDb.Wpt> = emptyList()
+    private var lastNavFixAt = 0L
+    private var navGpsLost = false
+    private val navWatchdog = object : Runnable {
+        override fun run() {
+            if (navMode != NavMode.ACTIVE) return
+            val now = System.currentTimeMillis()
+            if (lastNavFixAt > 0L && now - lastNavFixAt > 15_000L && !navGpsLost) {
+                navGpsLost = true
+                findViewById<TextView>(R.id.navText).text = "Нет сигнала GPS. Ожидаю восстановления…"
+                speak("Нет сигнала GPS. Ожидаю восстановления")
+            }
+            ui.postDelayed(this, 2_000L)
+        }
+    }
     private var following = false
     private var locActive = false
     private var locationRequestedByUser = false
@@ -423,11 +438,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStart() { super.onStart(); reopenPending(); refreshRecButton(); refreshLocationButton(); mapView.onStart(); compass.onStart(); if (locActive) startLocation(false) }
-    override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick() }
-    override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
-    override fun onStop() { stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
+    override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick(); if (navMode == NavMode.ACTIVE && !navGpsLost) lastNavFixAt = System.currentTimeMillis(); startNavWatchdog() }
+    override fun onPause() { stopNavWatchdog(); mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
+    override fun onStop() { stopNavWatchdog(); stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
     override fun onDestroy() {
+        stopNavWatchdog()
         routeRequestId++
         searchGeneration++
         elevationGeneration++
@@ -987,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
         val tap = m.projection.toScreenLocation(ll)
         var best: UserDb.Wpt? = null
         var bestD = dp(36f).toFloat()
-        for (w in userDb.waypoints()) {
+        for (w in waypointCache) {
             val q = m.projection.toScreenLocation(LatLng(w.lat, w.lon))
             val d = Math.hypot((q.x - tap.x).toDouble(), (q.y - tap.y).toDouble()).toFloat()
             if (d < bestD) { bestD = d; best = w }
@@ -1012,6 +1028,7 @@ class MainActivity : AppCompatActivity() {
             val geo = Geo.pointFc(points.map { LatLng(it.lat, it.lon) }, points.map { it.name })
             runOnUiThread {
                 if (generation == waypointRenderGeneration && !isFinishing && !isDestroyed) {
+                    waypointCache = points
                     src("ovl-wpt")?.setGeoJson(geo)
                 }
             }
@@ -1214,10 +1231,19 @@ class MainActivity : AppCompatActivity() {
 
     private val locListener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
+            val now = System.currentTimeMillis()
+            val current = myLoc
+            val candidateAccuracy = l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+            val currentAccuracy = current?.accuracy?.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+            if (!LocationQuality.shouldAccept(l.time, candidateAccuracy, current?.time ?: 0L, currentAccuracy, now)) return
             myLoc = l
             refreshMe()
-            if (navMode == NavMode.ACTIVE) onNavLocation(l)
-            else if (following && map != null) {
+            if (navMode == NavMode.ACTIVE && LocationQuality.isUsableForNavigation(l.time, candidateAccuracy, now, navProfile)) {
+                lastNavFixAt = now
+                if (navGpsLost) { navGpsLost = false; speak("Сигнал GPS восстановлен") }
+                onNavLocation(l)
+            }
+            else if (navMode != NavMode.ACTIVE && following && map != null) {
                 val z = maxOf(map!!.cameraPosition.zoom, 14.0)
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(l.latitude, l.longitude), z), 600)
             }
@@ -1229,8 +1255,10 @@ class MainActivity : AppCompatActivity() {
         override fun onProviderDisabled(provider: String) {
             val manager = getSystemService(LOCATION_SERVICE) as LocationManager
             val anyEnabled = try {
-                manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                    manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                val fine = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                val coarse = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                (fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) ||
+                    ((fine || coarse) && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
             } catch (_: Exception) { false }
             if (!anyEnabled) {
                 if (navMode == NavMode.ACTIVE) stopNav()
@@ -1254,8 +1282,10 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun startLocation(userRequested: Boolean) {
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val net = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        val finePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarsePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val gps = finePermission && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val net = (finePermission || coarsePermission) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         if (!gps && !net) {
             locActive = false
             locationRequestedByUser = false
@@ -1287,11 +1317,11 @@ class MainActivity : AppCompatActivity() {
             lm.removeUpdates(locListener)
             if (gps) lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locListener, Looper.getMainLooper())
             if (net) lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, locListener, Looper.getMainLooper())
-            if (myLoc == null) {
-                last = (if (gps) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null)
-                    ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                    ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-            }
+            last = listOfNotNull(
+                if (gps) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null,
+                if (net) lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) else null,
+                lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            ).maxByOrNull { it.time }
         } catch (e: SecurityException) {
             locActive = false
             locationRequestedByUser = false
@@ -1399,7 +1429,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addWaypointDialog(ll: LatLng) {
         val et = EditText(this)
-        et.setText("Точка ${userDb.waypointCount() + 1}")
+        et.setText("Точка ${waypointCache.size + 1}")
         et.setSelectAllOnFocus(true)
         MaterialAlertDialogBuilder(this)
             .setTitle("Сохранить точку\n" + Geo.fmtCoord(ll.latitude, ll.longitude))
@@ -2294,8 +2324,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER) &&
-            !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+        val finePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarsePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasUsableProvider = (finePermission && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) ||
+            ((finePermission || coarsePermission) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
+        if (!hasUsableProvider) {
             MaterialAlertDialogBuilder(this)
                 .setMessage("Для навигации включите геолокацию телефона.")
                 .setPositiveButton("Настройки") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
@@ -2303,6 +2336,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         navMode = NavMode.ACTIVE
+        lastNavFixAt = System.currentTimeMillis()
+        navGpsLost = false
+        startNavWatchdog()
         refreshLocationButton()
         offCount = 0
         announced.clear()
@@ -2320,10 +2356,16 @@ class MainActivity : AppCompatActivity() {
             setSummary(s.totalM, s.route.timeS)
         }
         val l = myLoc
-        if (l != null) onNavLocation(l) else toast("Ждём сигнал GPS…")
+        if (l != null && LocationQuality.isUsableForNavigation(l.time, l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY, System.currentTimeMillis(), navProfile)) {
+            lastNavFixAt = System.currentTimeMillis()
+            onNavLocation(l)
+        } else toast("Ждём точный сигнал GPS…")
     }
 
     private fun stopNav() {
+        stopNavWatchdog()
+        lastNavFixAt = 0L
+        navGpsLost = false
         routeRequestId++ // invalidate any route calculation still running in the background
         if (!locationRequestedByUser) {
             locActive = false
@@ -2352,7 +2394,16 @@ class MainActivity : AppCompatActivity() {
         updateNavUi()
     }
 
+    private fun startNavWatchdog() {
+        ui.removeCallbacks(navWatchdog)
+        if (navMode == NavMode.ACTIVE) ui.postDelayed(navWatchdog, 2_000L)
+    }
+
+    private fun stopNavWatchdog() { ui.removeCallbacks(navWatchdog) }
+
     private fun onNavLocation(l: Location) {
+        val accuracy = l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+        if (!LocationQuality.isUsableForNavigation(l.time, accuracy, System.currentTimeMillis(), navProfile)) return
         val s = session ?: return
         val prog = s.update(l.latitude, l.longitude)
         val m = map

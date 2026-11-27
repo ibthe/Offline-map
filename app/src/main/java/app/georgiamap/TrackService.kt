@@ -1,5 +1,6 @@
 package app.georgiamap
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -7,6 +8,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
@@ -34,12 +36,19 @@ class TrackService : Service() {
     private var trackId = 0L
     private var writeThread: HandlerThread? = null
     private var writeHandler: Handler? = null
-    private var activeProvider: String? = null
+    private val activeProviders = LinkedHashSet<String>()
+    private var lastAcceptedLocationTime = 0L
+    private var lastAcceptedAccuracy = Float.POSITIVE_INFINITY
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
             val id = trackId
-            if (id <= 0 || (l.hasAccuracy() && l.accuracy > 75f)) return
+            val accuracy = l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+            val now = System.currentTimeMillis()
+            if (id <= 0 || (accuracy.isFinite() && accuracy > 75f) ||
+                !LocationQuality.shouldAccept(l.time, accuracy, lastAcceptedLocationTime, lastAcceptedAccuracy, now)) return
+            lastAcceptedLocationTime = l.time
+            lastAcceptedAccuracy = accuracy
             val lat = l.latitude
             val lon = l.longitude
             val ele = if (l.hasAltitude()) l.altitude else Double.NaN
@@ -49,28 +58,20 @@ class TrackService : Service() {
             }
         }
 
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {
-            if (provider != activeProvider) return
+        override fun onProviderEnabled(provider: String) {
             val manager = lm ?: return
-            val fallback = try {
-                when {
-                    provider != LocationManager.GPS_PROVIDER && manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-                    provider != LocationManager.NETWORK_PROVIDER && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-                    else -> null
-                }
-            } catch (_: Exception) { null }
-            if (fallback == null) {
-                stopSelf()
-                return
-            }
+            val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val allowed = if (provider == LocationManager.GPS_PROVIDER) fine else provider == LocationManager.NETWORK_PROVIDER && (fine || coarse)
+            if (!allowed || provider in activeProviders) return
             try {
-                manager.removeUpdates(this)
-                manager.requestLocationUpdates(fallback, 3000L, 5f, this, Looper.getMainLooper())
-                activeProvider = fallback
-            } catch (_: Exception) {
-                stopSelf()
-            }
+                manager.requestLocationUpdates(provider, 3000L, 5f, this, Looper.getMainLooper())
+                activeProviders.add(provider)
+            } catch (_: Exception) { }
+        }
+
+        override fun onProviderDisabled(provider: String) {
+            if (activeProviders.remove(provider) && activeProviders.isEmpty()) stopSelf()
         }
         @Deprecated("Deprecated in Java")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -112,26 +113,37 @@ class TrackService : Service() {
 
         val manager = getSystemService(LOCATION_SERVICE) as LocationManager
         lm = manager
-        val provider = try {
-            when {
-                manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-                manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-                else -> null
-            }
+        val finePermission = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarsePermission = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val providers = try {
+            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .filter { provider ->
+                    val permissionAllowed = if (provider == LocationManager.GPS_PROVIDER) finePermission else finePermission || coarsePermission
+                    permissionAllowed && manager.isProviderEnabled(provider)
+                }
         } catch (_: SecurityException) {
-            null
+            emptyList()
         }
-        if (provider == null) {
+        if (providers.isEmpty()) {
             stopSelf()
             return START_NOT_STICKY
         }
-        activeProvider = provider
         writeThread = HandlerThread("track-db-writer").apply { start() }
         writeHandler = Handler(writeThread!!.looper)
         try {
             manager.removeUpdates(listener)
-            manager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+            activeProviders.clear()
+            for (provider in providers) {
+                try {
+                    manager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+                    activeProviders.add(provider)
+                } catch (_: Exception) { }
+            }
         } catch (_: Exception) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (activeProviders.isEmpty()) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -141,7 +153,7 @@ class TrackService : Service() {
 
     override fun onDestroy() {
         try { lm?.removeUpdates(listener) } catch (_: Exception) { }
-        activeProvider = null
+        activeProviders.clear()
         running = false
         val writer = writeHandler
         val thread = writeThread

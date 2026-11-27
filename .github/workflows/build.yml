@@ -48,47 +48,65 @@ jobs:
 
       - name: Cache source OSM extract
         id: cache_osm
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/georgia.osm.pbf
-          key: osm-v1-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py') }}
+          key: osm-v1-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            osm-v1-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py') }}-
+            osm-v1-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py') }}
 
       # Reuse only exact, validated assets. Bump tools/osm_data_revision.txt or tools/terrain_data_revision.txt when intentionally refreshing
       # the corresponding upstream data snapshot. An explicit osm_url also gets its own cache namespace.
       - name: Cache tiles
         id: cache_tiles
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: app/src/main/assets/georgia.mbtiles
-          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
+          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}-
+            tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
 
       - name: Cache search index
         id: cache_places
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: app/src/main/assets/places.db
-          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
+          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-
+            places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
 
       - name: Cache relief
         id: cache_relief
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: app/src/main/assets/relief.mbtiles
-          key: relief-v2-${{ hashFiles('tools/terrain_data_revision.txt', 'tools/build_relief.py') }}
+          key: relief-v2-${{ hashFiles('tools/terrain_data_revision.txt', 'tools/build_relief.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            relief-v2-${{ hashFiles('tools/terrain_data_revision.txt', 'tools/build_relief.py') }}-
+            relief-v2-${{ hashFiles('tools/terrain_data_revision.txt', 'tools/build_relief.py') }}
 
       - name: Cache contour lines
         id: cache_contours
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: app/src/main/assets/contours.mbtiles
-          key: contours-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_external_data_revision.txt', 'tools/planetiler_version.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}
+          key: contours-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_external_data_revision.txt', 'tools/planetiler_version.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            contours-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_external_data_revision.txt', 'tools/planetiler_version.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}-
+            contours-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_external_data_revision.txt', 'tools/planetiler_version.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}
 
       - name: Cache road graph (navigator)
         id: cache_routing
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: app/src/main/assets/routing.bin
-          key: routing-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_routing.py', 'tools/fetch_osm.py') }}
+          key: routing-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_routing.py', 'tools/fetch_osm.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            routing-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_routing.py', 'tools/fetch_osm.py') }}-
+            routing-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_routing.py', 'tools/fetch_osm.py') }}
 
       # Validate each cache independently. Only rebuild dependent assets when their input changed.
       - name: Decide what has to be rebuilt
@@ -103,30 +121,32 @@ jobs:
           routing_ok=false
           osm_ok=false
 
-          if [ "${{ steps.cache_osm.outputs.cache-hit }}" = "true" ] &&
-             python tools/check_cached_assets.py osm data/georgia.osm.pbf; then
+          if [ -s data/georgia.osm.pbf ] && python tools/check_cached_assets.py osm data/georgia.osm.pbf; then
             osm_ok=true
           fi
-          if [ "${{ steps.cache_tiles.outputs.cache-hit }}" = "true" ] && [ -s app/src/main/assets/georgia.mbtiles ] &&
+          if [ -s app/src/main/assets/georgia.mbtiles ] &&
              python tools/check_tiles.py app/src/main/assets/georgia.mbtiles >/dev/null; then
             tiles_ok=true
           fi
-          if [ "${{ steps.cache_places.outputs.cache-hit }}" = "true" ] &&
-             python tools/check_cached_assets.py places app/src/main/assets/places.db; then
+          if [ -s app/src/main/assets/places.db ] && python tools/check_cached_assets.py places app/src/main/assets/places.db; then
             places_ok=true
           fi
-          if [ "${{ steps.cache_relief.outputs.cache-hit }}" = "true" ] &&
-             python tools/check_cached_assets.py relief app/src/main/assets/relief.mbtiles; then
+          if [ -s app/src/main/assets/relief.mbtiles ] && python tools/check_cached_assets.py relief app/src/main/assets/relief.mbtiles; then
             relief_ok=true
           fi
-          if [ "${{ steps.cache_contours.outputs.cache-hit }}" = "true" ] &&
-             python tools/check_cached_assets.py contours app/src/main/assets/contours.mbtiles; then
+          if [ -s app/src/main/assets/contours.mbtiles ] && python tools/check_cached_assets.py contours app/src/main/assets/contours.mbtiles; then
             contours_ok=true
           fi
-          if [ "${{ steps.cache_routing.outputs.cache-hit }}" = "true" ] &&
-             python tools/check_cached_assets.py routing app/src/main/assets/routing.bin; then
+          if [ -s app/src/main/assets/routing.bin ] && python tools/check_cached_assets.py routing app/src/main/assets/routing.bin; then
             routing_ok=true
           fi
+
+          if [ "$osm_ok" != true ]; then rm -f data/georgia.osm.pbf; fi
+          if [ "$tiles_ok" != true ]; then rm -f app/src/main/assets/georgia.mbtiles; fi
+          if [ "$places_ok" != true ]; then rm -f app/src/main/assets/places.db; fi
+          if [ "$relief_ok" != true ]; then rm -f app/src/main/assets/relief.mbtiles; fi
+          if [ "$contours_ok" != true ]; then rm -f app/src/main/assets/contours.mbtiles; fi
+          if [ "$routing_ok" != true ]; then rm -f app/src/main/assets/routing.bin; fi
 
           need_tiles=false
           need_places=false
@@ -167,12 +187,14 @@ jobs:
           OSM_URL: ${{ github.event.inputs.osm_url }}
         run: |
           mkdir -p data
+          rm -f data/georgia.osm.pbf
           python tools/fetch_osm.py data/georgia.osm.pbf
           ls -lh data/georgia.osm.pbf
 
       - name: Build vector tiles with Planetiler (OpenMapTiles schema)
         if: steps.need.outputs.tiles == 'true'
         run: |
+          rm -f app/src/main/assets/georgia.mbtiles
           curl -L --fail --retry 3 -o data/planetiler.jar \
             https://github.com/onthegomap/planetiler/releases/download/${{ steps.planetiler.outputs.version }}/planetiler.jar
           mkdir -p app/src/main/assets
@@ -194,7 +216,9 @@ jobs:
       - name: Build offline search index
         if: steps.need.outputs.places == 'true'
         working-directory: tools
-        run: python build_places.py ../app/src/main/assets/georgia.mbtiles ../app/src/main/assets/places.db
+        run: |
+          rm -f ../app/src/main/assets/places.db
+          python build_places.py ../app/src/main/assets/georgia.mbtiles ../app/src/main/assets/places.db
 
       # Road graph for the offline navigator (car / foot / bike). Optional: without it the app simply has no routing.
       - name: Build road graph for the navigator
@@ -245,6 +269,58 @@ jobs:
               rm -f "$path"
             fi
           done
+
+      - name: Mark rebuilt assets ready for cache
+        id: cache_save
+        run: |
+          if [ "${{ steps.need.outputs.osm }}" = "true" ] && python tools/check_cached_assets.py osm data/georgia.osm.pbf; then echo "osm=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ steps.need.outputs.tiles }}" = "true" ] && python tools/check_tiles.py app/src/main/assets/georgia.mbtiles >/dev/null; then echo "tiles=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ steps.need.outputs.places }}" = "true" ] && python tools/check_cached_assets.py places app/src/main/assets/places.db; then echo "places=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ steps.need.outputs.relief }}" = "true" ] && python tools/check_cached_assets.py relief app/src/main/assets/relief.mbtiles; then echo "relief=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ steps.need.outputs.contours }}" = "true" ] && python tools/check_cached_assets.py contours app/src/main/assets/contours.mbtiles; then echo "contours=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ steps.need.outputs.routing }}" = "true" ] && python tools/check_cached_assets.py routing app/src/main/assets/routing.bin; then echo "routing=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save rebuilt osm cache
+        if: steps.cache_save.outputs.osm == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/georgia.osm.pbf
+          key: osm-v1-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/fetch_osm.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save rebuilt tiles cache
+        if: steps.cache_save.outputs.tiles == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src/main/assets/georgia.mbtiles
+          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save rebuilt places cache
+        if: steps.cache_save.outputs.places == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src/main/assets/places.db
+          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save rebuilt relief cache
+        if: steps.cache_save.outputs.relief == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src/main/assets/relief.mbtiles
+          key: relief-v2-${{ hashFiles('tools/terrain_data_revision.txt', 'tools/build_relief.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save rebuilt contours cache
+        if: steps.cache_save.outputs.contours == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src/main/assets/contours.mbtiles
+          key: contours-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_external_data_revision.txt', 'tools/planetiler_version.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save rebuilt routing cache
+        if: steps.cache_save.outputs.routing == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src/main/assets/routing.bin
+          key: routing-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_routing.py', 'tools/fetch_osm.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Build label fonts (Latin + Cyrillic + Georgian)
         run: |
