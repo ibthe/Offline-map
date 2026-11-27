@@ -151,6 +151,8 @@ class RouterRegressionTest {
         assertNotNull(avoidDifficult)
         assertTrue(avoidUnpaved!!.distanceM > normal!!.distanceM * 1.2)
         assertTrue(avoidDifficult!!.distanceM > normal.distanceM * 1.2)
+        assertTrue(avoidUnpaved.warnings.isEmpty())
+        assertTrue(avoidDifficult.warnings.isEmpty())
         assertNull(g.route(aLat, aLon, bLat, bLon, Profile.FOOT,
             RoutePreference.FASTEST, RouteAvoidance.ALL + 1))
     }
