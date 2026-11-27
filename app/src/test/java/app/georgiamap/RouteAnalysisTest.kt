@@ -6,6 +6,41 @@ import org.junit.Test
 
 class RouteAnalysisTest {
     @Test
+    fun samplesAcrossAntimeridianUsingShortLongitudeArc() {
+        val seen = ArrayList<Double>()
+        val samples = RouteAnalysis.sample(
+            listOf(
+                RouteAnalysis.Point(0.0, 179.9),
+                RouteAnalysis.Point(0.0, -179.9)
+            ),
+            spacingM = 10_000.0,
+            maxSamples = 3
+        ) { _, lon ->
+            seen.add(lon)
+            10.0
+        }
+        assertEquals(3, samples.size)
+        assertTrue(seen.any { kotlin.math.abs(kotlin.math.abs(it) - 180.0) < 0.01 })
+        assertTrue(samples.last().distanceM in 22_000.0..23_000.0)
+    }
+
+    @Test
+    fun boundsSamplingWorkForVeryDenseRouteGeometry() {
+        val points = (0..100_000).map {
+            RouteAnalysis.Point(41.0 + it * 0.0000001, 44.0)
+        }
+        var elevationCalls = 0
+        val samples = RouteAnalysis.sample(points, spacingM = 20.0, maxSamples = 240) { _, _ ->
+            elevationCalls++
+            150.0
+        }
+        assertTrue(samples.size <= 240)
+        assertEquals(samples.size, elevationCalls)
+        assertEquals(0.0, samples.first().distanceM, 0.0)
+        assertTrue(samples.last().distanceM > 1_000.0)
+    }
+
+    @Test
     fun calculatesElevationRangeAscentDescentAndDifficulty() {
         val result = RouteAnalysis.calculate(
             listOf(
