@@ -7,9 +7,12 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import kotlin.math.PI
+import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.ln
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tan
 
 /** Waypoints and recorded tracks (private, on-device). */
@@ -161,6 +164,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 3) {
 class PlaceDb(path: String) {
     data class Place(val ka: String, val ru: String, val en: String, val kind: String,
                      val lat: Double, val lon: Double, val ele: Int)
+    data class NearbyPlace(val place: Place, val distanceM: Double)
 
     private val db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
 
@@ -209,6 +213,36 @@ class PlaceDb(path: String) {
             ).use { c -> while (c.moveToNext() && out.size < maxResults) append(c) }
         }
         return out
+    }
+
+    /** Returns nearest matching offline POIs, ordered by great-circle distance. */
+    @Synchronized
+    fun nearbyKinds(lat: Double, lon: Double, kinds: List<String>, limit: Int = 5): List<NearbyPlace> {
+        if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0)
+            return emptyList()
+        val safeKinds = kinds.filter { it.matches(Regex("[a-z_]+")) }.distinct()
+        if (safeKinds.isEmpty()) return emptyList()
+        val args = safeKinds.toTypedArray()
+        val placeholders = safeKinds.joinToString(",") { "?" }
+        val candidates = ArrayList<NearbyPlace>()
+        db.rawQuery(
+            "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where kind in ($placeholders) limit 10000",
+            args
+        ).use { c ->
+            while (c.moveToNext()) {
+                val place = Place(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "",
+                    c.getString(3) ?: "", c.getDouble(4), c.getDouble(5), c.getInt(6))
+                val p1 = Math.toRadians(lat)
+                val p2 = Math.toRadians(place.lat)
+                val dp = p2 - p1
+                val dl = Math.toRadians(place.lon - lon)
+                val h = sin(dp / 2) * sin(dp / 2) +
+                    cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
+                val distance = 2.0 * 6_371_008.8 * asin(sqrt(h.coerceIn(0.0, 1.0)))
+                if (distance.isFinite()) candidates.add(NearbyPlace(place, distance))
+            }
+        }
+        return candidates.sortedBy { it.distanceM }.take(limit.coerceIn(1, 50))
     }
 
     @Synchronized
