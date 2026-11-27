@@ -102,6 +102,16 @@ class RouterRegressionTest {
     }
 
     @Test
+    fun hikingProfileCanUseFootAccessibleTrails() {
+        val g = graph()
+        val (aLat, aLon) = point(0.0, 0.0)
+        val (bLat, bLon) = point(3.0, 3.0)
+        val hike = g.route(aLat, aLon, bLat, bLon, Profile.HIKE)
+        assertNotNull(hike)
+        assertTrue(hike!!.timeS > 0.0)
+    }
+
+    @Test
     fun bikeProfileCanUseTheStreetNetwork() {
         val g = graph()
         val (aLat, aLon) = point(0.0, 0.0)

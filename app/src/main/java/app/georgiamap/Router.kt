@@ -15,6 +15,7 @@ object Profile {
     const val CAR = 0
     const val FOOT = 1
     const val BIKE = 2
+    const val HIKE = 3
 }
 
 object Maneuver {
@@ -144,7 +145,10 @@ class RoadGraph(buf: ByteBuffer) {
     }
 
     // ------------------------------------------------------------------ edge helpers
-    private fun canGo(e: Int, dir: Int, p: Int) = (eFlags[e] shr (if (dir == 0) p else 3 + p)) and 1 == 1
+    private fun canGo(e: Int, dir: Int, p: Int): Boolean {
+        val accessProfile = if (p == Profile.HIKE) Profile.FOOT else p
+        return (eFlags[e] shr (if (dir == 0) accessProfile else 3 + accessProfile)) and 1 == 1
+    }
     private fun cls(e: Int) = (eFlags[e] shr 14) and 15
     private fun isRound(e: Int) = (eFlags[e] shr 18) and 1 == 1
     private fun isUnpaved(e: Int) = (eFlags[e] shr 19) and 1 == 1
@@ -153,6 +157,11 @@ class RoadGraph(buf: ByteBuffer) {
         val kmh = when (p) {
             Profile.CAR -> ((eFlags[e] shr 6) and 255).toDouble()
             Profile.FOOT -> when (cls(e)) { 9 -> 3.0; 7, 8 -> 4.2; else -> 5.0 }
+            Profile.HIKE -> when (cls(e)) {
+                9 -> 2.2
+                7, 8 -> 4.5
+                else -> 3.2
+            }
             else -> {
                 val v = when (cls(e)) { 8 -> 14.0; 7 -> 11.0; 0, 1 -> 14.0; 2 -> 15.0; 9 -> 4.0; else -> 17.0 }
                 if (isUnpaved(e)) v * 0.7 else v
@@ -165,6 +174,7 @@ class RoadGraph(buf: ByteBuffer) {
     private fun connectorSpeedMs(p: Int) = when (p) {
         Profile.CAR -> 36.0
         Profile.FOOT -> 1.5
+        Profile.HIKE -> 1.2
         else -> 8.0
     }
 
@@ -308,7 +318,7 @@ class RoadGraph(buf: ByteBuffer) {
 
     @Synchronized
     fun route(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int): RouteResult? {
-        if (p !in Profile.CAR..Profile.BIKE) return null
+        if (p !in Profile.CAR..Profile.HIKE) return null
         if (!fromLat.isFinite() || !fromLon.isFinite() || !toLat.isFinite() || !toLon.isFinite()) return null
         if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 ||
             fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) return null
@@ -354,7 +364,7 @@ class RoadGraph(buf: ByteBuffer) {
         java.util.Arrays.fill(prev, -2)
         java.util.Arrays.fill(closed, false)
 
-        val vmax = when (p) { Profile.CAR -> 130.0 / 3.6 + 1e-6; Profile.FOOT -> 1.5; else -> 8.0 }
+        val vmax = when (p) { Profile.CAR -> 130.0 / 3.6 + 1e-6; Profile.FOOT, Profile.HIKE -> 1.5; else -> 8.0 }
         val graphMinLat = gridLat0.toDouble() / 1e6
         val graphMaxLat = (gridLat0.toDouble() + rows.toDouble() * cell) / 1e6
         val maxAbsLat = max(abs(toLat), max(abs(graphMinLat), abs(graphMaxLat)))

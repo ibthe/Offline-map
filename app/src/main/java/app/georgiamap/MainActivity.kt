@@ -2023,10 +2023,10 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ navigator (offline road routing)
 
-    private fun profileName(p: Int) = when (p) { Profile.FOOT -> "Пешком"; Profile.BIKE -> "На велосипеде"; else -> "На авто" }
+    private fun profileName(p: Int) = when (p) { Profile.FOOT -> "Пешком"; Profile.HIKE -> "Поход"; Profile.BIKE -> "На велосипеде"; else -> "На авто" }
 
     private fun showNavProfileDialog() {
-        val ps = listOf(Profile.CAR, Profile.FOOT, Profile.BIKE)
+        val ps = listOf(Profile.CAR, Profile.FOOT, Profile.HIKE, Profile.BIKE)
         MaterialAlertDialogBuilder(this).setTitle("Транспорт по умолчанию")
             .setSingleChoiceItems(ps.map { profileName(it) }.toTypedArray(), ps.indexOf(navProfile)) { d, which ->
                 navProfile = ps[which]
