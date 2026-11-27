@@ -21,7 +21,7 @@ android {
         targetSdk = 34
         // CI uses a monotonic versionCode; map asset copying is controlled by MAP_DATA_VERSION
         versionCode = (project.findProperty("vcode") as String?)?.toIntOrNull() ?: 1
-        versionName = "3.3.1"
+        versionName = "3.4.0"
         buildConfigField("String", "MAP_DATA_VERSION", "\"$mapDataVersion\"")
     }
 
