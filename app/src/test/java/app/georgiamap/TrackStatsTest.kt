@@ -64,6 +64,7 @@ class TrackStatsTest {
             TrackStats.Sample(41.001, 44.0, 10.0, 121_000L)
         )))
         assertEquals(60_000L, result.movingMs)
+        assertEquals(60_000L, result.stoppedMs)
         assertTrue(result.averageSpeedKmh > 0.0)
     }
 
