@@ -1041,7 +1041,10 @@ class MainActivity : AppCompatActivity() {
         val generation = ++trackRenderGeneration
         thread(name = "track-render") {
             fun lines(id: Long) = if (id > 0L) userDb.trackSegments(id).map { segment ->
-                segment.map { LatLng(it.lat, it.lon) }
+                TrackGeometry.simplify(
+                    segment.map { TrackGeometry.Point(it.lat, it.lon) },
+                    toleranceMeters = 5.0
+                ).map { LatLng(it.lat, it.lon) }
             } else emptyList()
             val selected = try { lines(selectedId) } catch (_: Exception) { emptyList() }
             val recording = try { lines(recordingId) } catch (_: Exception) { emptyList() }
