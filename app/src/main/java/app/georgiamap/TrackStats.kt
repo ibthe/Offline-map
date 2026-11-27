@@ -1,7 +1,9 @@
 package app.georgiamap
 
+import kotlin.math.asin
 import kotlin.math.cos
-import kotlin.math.hypot
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /** Statistics computed per GPX segment; gaps between segments are never counted as distance or moving time. */
 object TrackStats {
@@ -49,9 +51,8 @@ object TrackStats {
             for (i in 1 until segment.size) {
                 val a = segment[i - 1]
                 val b = segment[i]
-                val dx = (b.lon - a.lon) * 111_320.0 * cos(Math.toRadians((a.lat + b.lat) / 2.0))
-                val dy = (b.lat - a.lat) * 110_574.0
-                val d = hypot(dx, dy)
+                val d = distanceMeters(a.lat, a.lon, b.lat, b.lon)
+                if (!d.isFinite()) continue
                 val dt = b.timestampMs - a.timestampMs
                 val hasShortTimedInterval = a.timestampMs > 0L &&
                     b.timestampMs > a.timestampMs && dt <= MAX_MOVING_INTERVAL_MS
@@ -81,5 +82,19 @@ object TrackStats {
         val elapsed = if (minTime != Long.MAX_VALUE && maxTime >= minTime) maxTime - minTime else 0L
         val average = if (moving > 0L) movingDistance / moving * 3_600.0 else 0.0
         return Result(distance, ascent, descent, elapsed, moving, stopped, average, maxSpeed, pointCount, elevationSamples)
+    }
+
+    private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        if (!lat1.isFinite() || !lon1.isFinite() || !lat2.isFinite() || !lon2.isFinite() ||
+            lat1 !in -90.0..90.0 || lat2 !in -90.0..90.0 ||
+            lon1 !in -180.0..180.0 || lon2 !in -180.0..180.0) return Double.NaN
+        val p1 = Math.toRadians(lat1)
+        val p2 = Math.toRadians(lat2)
+        val dp = p2 - p1
+        val rawLon = lon2 - lon1
+        val dl = Math.toRadians(((rawLon + 540.0) % 360.0) - 180.0)
+        val h = sin(dp / 2) * sin(dp / 2) +
+            cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
+        return 2.0 * 6_371_008.8 * asin(sqrt(h.coerceIn(0.0, 1.0)))
     }
 }
