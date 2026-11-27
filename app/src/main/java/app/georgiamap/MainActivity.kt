@@ -2593,7 +2593,7 @@ class MainActivity : AppCompatActivity() {
                 val points = (0 until route.pointCount).map { i ->
                     RouteAnalysis.Point(route.lat(i), route.lon(i))
                 }
-                val samples = RouteAnalysis.sample(points, spacingM = 100.0, maxSamples = 240) { lat, lon ->
+                val samples = RouteAnalysis.sample(points, spacingM = 50.0, maxSamples = 240) { lat, lon ->
                     db.at(lat, lon)?.toDouble()
                 }
                 RouteAnalysis.calculate(samples, route.distanceM)
