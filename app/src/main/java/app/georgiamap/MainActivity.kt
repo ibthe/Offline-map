@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
     private var routeAnalysisGeneration = 0
     private var routeAnalysisBusy = false
     private var routeAnalysisResult: RouteAnalysis.Result? = null
+    private var safetyLookupGeneration = 0
 
     private var rulerOn = false
     private val rulerPts = ArrayList<LatLng>()
@@ -476,6 +477,7 @@ class MainActivity : AppCompatActivity() {
         listLoadGeneration++
         diagnosticsGeneration++
         routeAnalysisGeneration++
+        safetyLookupGeneration++
         searchTask?.let { ui.removeCallbacks(it) }
         elevationTask?.let { ui.removeCallbacks(it) }
         tts?.shutdown()
@@ -1550,13 +1552,25 @@ class MainActivity : AppCompatActivity() {
         } ?: "Нет свежих координат GPS"
         val accuracy = location?.accuracy?.takeIf { it.isFinite() && it > 0f }
         val ageSeconds = location?.let { ((now - it.time).coerceAtLeast(0L) / 1000L) }
-        val status = if (hasFreshFix) {
+        val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val batteryLevel = battery?.let {
+            val level = it.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+            val scale = it.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+            if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+        } ?: -1
+        val batteryStatus = when {
+            batteryLevel < 0 -> "Заряд батареи: неизвестен"
+            batteryLevel <= 10 -> "⚠ Критически низкий заряд: $batteryLevel%"
+            batteryLevel <= 20 -> "⚠ Низкий заряд батареи: $batteryLevel%"
+            else -> "Заряд батареи: $batteryLevel%"
+        }
+        val status = (if (hasFreshFix) {
             "Координаты: $coordinates\n" +
                 (accuracy?.let { "Точность: ±${it.roundToInt()} м\n" } ?: "Точность: неизвестна\n") +
-                "Последнее обновление: ${ageSeconds ?: 0} сек. назад"
+                "Последнее обновление: ${ageSeconds ?: 0} сек."
         } else {
             "$coordinates\nВключите GPS и дождитесь актуального местоположения."
-        }
+        }) + "\n" + batteryStatus
 
         val density = resources.displayMetrics.density
         val pad = (18 * density).toInt()
@@ -1605,6 +1619,9 @@ class MainActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_TEXT, coordinates)
             }, "Поделиться координатами"))
         }
+        action("Ближайшие больницы, полиция и населённые пункты", hasFreshFix && placeDb != null) {
+            showNearbySafetyPlaces(location!!.latitude, location.longitude)
+        }
         action(if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) "Остановить запись трека" else "Начать запись трека") {
             toggleRecording()
         }
@@ -1619,6 +1636,67 @@ class MainActivity : AppCompatActivity() {
         val scroll = android.widget.ScrollView(this).apply { addView(content) }
         MaterialAlertDialogBuilder(this).setTitle("Экспедиция и безопасность")
             .setView(scroll).setPositiveButton("Закрыть", null).show()
+    }
+
+    private fun showNearbySafetyPlaces(lat: Double, lon: Double) {
+        val db = placeDb ?: run {
+            toast("В выбранном пакете нет офлайн-индекса мест")
+            return
+        }
+        val generation = ++safetyLookupGeneration
+        val progress = MaterialAlertDialogBuilder(this)
+            .setMessage("Ищу ближайшие объекты в офлайн-карте…")
+            .setNegativeButton("Отмена") { _, _ -> safetyLookupGeneration++ }
+            .create()
+        progress.setOnCancelListener { if (generation == safetyLookupGeneration) safetyLookupGeneration++ }
+        progress.show()
+        thread(name = "nearby-safety-places") {
+            val nearby = try {
+                db.nearbyKinds(lat, lon, listOf(
+                    "hospital", "clinic", "doctors", "dentist", "police", "fire_station", "emergency",
+                    "city", "town", "village", "hamlet", "suburb", "isolated_dwelling"
+                ), 20)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            runOnUiThread {
+                if (generation != safetyLookupGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                if (nearby.isEmpty()) {
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle("Ближайшие объекты")
+                        .setMessage("В офлайн-данных этого региона подходящие объекты не найдены. Это не означает, что поблизости нет больниц или служб.")
+                        .setPositiveButton("Закрыть", null).show()
+                    return@runOnUiThread
+                }
+                fun kindLabel(kind: String) = when (kind) {
+                    "hospital" -> "Больница"
+                    "clinic", "doctors", "dentist" -> "Медицинская помощь"
+                    "police" -> "Полиция"
+                    "fire_station" -> "Пожарная служба"
+                    "emergency" -> "Экстренная служба"
+                    "city", "town", "village", "hamlet", "suburb", "isolated_dwelling" -> "Населённый пункт"
+                    else -> "Объект"
+                }
+                val labels = nearby.map { item ->
+                    val p = item.place
+                    val name = p.ru.ifBlank { p.ka.ifBlank { p.en } }
+                    "${kindLabel(p.kind)} · $name\n${Geo.fmtDist(item.distanceM)}"
+                }.toTypedArray()
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Ближайшие объекты · офлайн")
+                    .setItems(labels) { _, index ->
+                        val place = nearby[index].place
+                        val target = LatLng(place.lat, place.lon)
+                        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.0))
+                        val name = place.ru.ifBlank { place.ka.ifBlank { place.en } }
+                        tvInfo.text = "$name · ${Geo.fmtCoord(place.lat, place.lon)}"
+                        tvInfo.visibility = View.VISIBLE
+                    }
+                    .setPositiveButton("Закрыть", null)
+                    .show()
+            }
+        }
     }
 
     private fun showLanguageDialog() {
