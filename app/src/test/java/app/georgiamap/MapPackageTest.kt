@@ -98,6 +98,24 @@ tiles=tiles.mbtiles
                 MapPackageInstaller.install(ByteArrayInputStream(invalid), root)
                 throw AssertionError("invalid SQLite asset should be rejected")
             } catch (_: IllegalArgumentException) { }
+
+            val invalidEmergency = archive(
+                """id=turkey
+title=Турция
+countryCode=TR
+emergencyNumber=911abc
+south=35
+west=25
+north=42
+east=45
+tiles=tiles.mbtiles
+""",
+                mapOf("tiles.mbtiles" to sqliteHeader())
+            )
+            try {
+                MapPackageInstaller.install(ByteArrayInputStream(invalidEmergency), root)
+                throw AssertionError("invalid emergency number should be rejected")
+            } catch (_: IllegalArgumentException) { }
         } finally {
             root.deleteRecursively()
         }
