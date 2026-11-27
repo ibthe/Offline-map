@@ -189,9 +189,53 @@ object MapPackageInstaller {
     fun validateInstalled(pack: MapPackage, filesRoot: File): Boolean {
         if (pack.directory == null) return true
         return runCatching {
-            validateAssets(pack, File(File(filesRoot, "map-packages"), pack.directory))
+            val directory = File(File(filesRoot, "map-packages"), pack.directory)
+            validateAssets(pack, directory)
+            validateSqliteAssets(pack, directory)
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * Header checks protect extraction; these lightweight schema probes protect runtime use.
+     * They deliberately avoid a full quick_check on multi-gigabyte MBTiles at every app launch.
+     */
+    private fun validateSqliteAssets(pack: MapPackage, directory: File) {
+        fun inspect(name: String, requiredTables: Map<String, Set<String>>, sampleTables: Set<String>) {
+            val file = File(directory, name)
+            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                file.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+            try {
+                for ((table, requiredColumns) in requiredTables) {
+                    val columns = HashSet<String>()
+                    db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
+                        while (cursor.moveToNext()) columns.add(cursor.getString(1))
+                    }
+                    require(columns.containsAll(requiredColumns)) { "Invalid $name schema: $table" }
+                }
+                for (table in sampleTables) {
+                    db.rawQuery("SELECT 1 FROM $table LIMIT 1", null).use { cursor ->
+                        require(cursor.moveToFirst()) { "Empty $name table: $table" }
+                    }
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+        inspect(pack.tilesAsset, mapOf(
+            "tiles" to setOf("zoom_level", "tile_column", "tile_row", "tile_data"),
+            "metadata" to setOf("name", "value")
+        ), setOf("tiles", "metadata"))
+        pack.placesAsset?.let { name ->
+            inspect(name, mapOf(
+                "places" to setOf("id", "ka", "ru", "en", "kind", "lat", "lon", "s"),
+                "places_fts" to setOf("ka", "ru", "en", "s")
+            ), setOf("places", "places_fts"))
+        }
+        pack.reliefAsset?.let { inspect(it, mapOf("tiles" to setOf("zoom_level", "tile_column", "tile_row", "tile_data")), setOf("tiles")) }
+        pack.contoursAsset?.let { inspect(it, mapOf("tiles" to setOf("zoom_level", "tile_column", "tile_row", "tile_data")), setOf("tiles")) }
     }
 
     private fun manifestId(bytes: ByteArray): String {
