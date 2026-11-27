@@ -10,7 +10,8 @@ internal class TrackPauseDetector(
     private val pauseAfterMs: Long = 120_000L,
     private val stationaryRadiusM: Double = 15.0,
     private val resumeDistanceM: Double = 25.0,
-    private val resumeSpeedKmh: Double = 1.5
+    private val resumeSpeedKmh: Double = 1.5,
+    private val enabled: Boolean = true
 ) {
     enum class Event { RECORD, PAUSED, RESUMED, SKIP }
     private data class Fix(val lat: Double, val lon: Double, val timeMs: Long, val accuracyM: Double)
@@ -27,6 +28,10 @@ internal class TrackPauseDetector(
         val accuracy = accuracyM.takeIf { it.isFinite() && it > 0.0 } ?: 10.0
         val current = Fix(lat, lon, timeMs, accuracy)
         val prior = previous
+        if (!enabled) {
+            previous = current
+            return Event.RECORD
+        }
         if (prior == null) {
             previous = current
             return Event.RECORD
