@@ -56,6 +56,16 @@ class WayAccessTests(unittest.TestCase):
         self.assertTrue(bit(explicit_two_way, 0))
         self.assertTrue(bit(explicit_two_way, 3))
 
+    def test_tracktype_and_smoothness_are_encoded_for_terrain_avoidance(self):
+        rough = flags({"surface": "gravel", "tracktype": "grade5", "smoothness": "bad"})
+        self.assertTrue(bit(rough, 19))
+        self.assertEqual(5, (rough >> 20) & 7)
+        self.assertEqual(4, (rough >> 23) & 7)
+        smooth = flags({"surface": "paved", "tracktype": "grade1", "smoothness": "good"})
+        self.assertFalse(bit(smooth, 19))
+        self.assertEqual(1, (smooth >> 20) & 7)
+        self.assertEqual(2, (smooth >> 23) & 7)
+
     def test_restricted_access_values_are_not_treated_as_public(self):
         for value in ("no", "private", "customers", "delivery", "destination", "agricultural", "forestry"):
             with self.subTest(value=value):
