@@ -1859,25 +1859,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun parseGpxTime(value: String): Long {
-        val patterns = listOf(
-            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-            "yyyy-MM-dd'T'HH:mm:ssXXX",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss"
-        )
-        for (pattern in patterns) {
-            try {
-                return SimpleDateFormat(pattern, Locale.US).apply {
-                    isLenient = false
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.parse(value)?.time ?: continue
-            } catch (_: Exception) { }
-        }
-        return 0L
-    }
-
     private fun readGpx(uri: Uri) {
         if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) {
             toast("Остановите запись трека перед импортом GPX")
@@ -1887,111 +1868,21 @@ class MainActivity : AppCompatActivity() {
         loading.visibility = View.VISIBLE
         thread(name = "gpx-import") {
             try {
-                val waypoints = ArrayList<UserDb.Wpt>()
-                val tracks = ArrayList<UserDb.ImportTrack>()
-                var pointCount = 0
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    val p = Xml.newPullParser()
-                    p.setInput(stream, null)
-                    var inWpt = false
-                    var inTrack = false
-                    var pointTag = ""
-                    var wptLat = 0.0
-                    var wptLon = 0.0
-                    var wptName = ""
-                    var wptTimestamp = 0L
-                    var lat = 0.0
-                    var lon = 0.0
-                    var ele = Double.NaN
-                    var timestamp = 0L
-                    var trackName = "Импорт GPX"
-                    var segment = 0
-                    var nextSegment = 0
-                    var rootSeen = false
-                    val points = ArrayList<UserDb.Pt>()
-
-                    fun coordinate(tag: String, attr: String): Double {
-                        val value = p.getAttributeValue(null, attr)?.toDoubleOrNull()
-                            ?: throw IllegalArgumentException("Нет корректной координаты $attr у $tag")
-                        if (!value.isFinite() || (attr == "lat" && value !in -90.0..90.0) ||
-                            (attr == "lon" && value !in -180.0..180.0)) {
-                            throw IllegalArgumentException("Координата $attr вне допустимого диапазона у $tag")
+                val parsed = contentResolver.openInputStream(uri)?.use { stream ->
+                    GpxParser.parse(stream) { count ->
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) loadingText.text = "Импорт GPX: $count точек…"
                         }
-                        return value
                     }
-
-                    var ev = p.eventType
-                    while (ev != XmlPullParser.END_DOCUMENT) {
-                        if (ev == XmlPullParser.START_TAG) {
-                            if (!rootSeen) {
-                                if (p.name != "gpx") error("Файл не является GPX")
-                                rootSeen = true
-                            }
-                            when (p.name) {
-                                "wpt" -> {
-                                    inWpt = true
-                                    wptName = ""
-                                    wptTimestamp = 0L
-                                    wptLat = coordinate("wpt", "lat")
-                                    wptLon = coordinate("wpt", "lon")
-                                }
-                                "trk", "rte" -> {
-                                    inTrack = true
-                                    trackName = "Импорт GPX"
-                                    points.clear()
-                                    segment = 0
-                                    nextSegment = 0
-                                }
-                                "trkseg" -> if (inTrack) segment = nextSegment++
-                                "trkpt", "rtept" -> if (inTrack) {
-                                    pointTag = p.name
-                                    lat = coordinate(pointTag, "lat")
-                                    lon = coordinate(pointTag, "lon")
-                                    ele = Double.NaN
-                                    timestamp = 0L
-                                }
-                                "name" -> {
-                                    val value = p.nextText()
-                                    if (inWpt) wptName = value.take(200) else if (inTrack && pointTag.isEmpty()) trackName = value.take(200)
-                                }
-                                "ele" -> if (pointTag.isNotEmpty()) ele = p.nextText().toDoubleOrNull()?.takeIf { it.isFinite() } ?: Double.NaN
-                                "time" -> {
-                                    val value = parseGpxTime(p.nextText())
-                                    if (inWpt) wptTimestamp = value else if (pointTag.isNotEmpty()) timestamp = value
-                                }
-                            }
-                        } else if (ev == XmlPullParser.END_TAG) {
-                            when (p.name) {
-                                "wpt" -> {
-                                    if (waypoints.size >= 20_000) error("Слишком много точек в GPX (лимит 20 000)")
-                                    waypoints.add(UserDb.Wpt(0L, wptName.ifBlank { "Точка ${waypoints.size + 1}" }, wptLat, wptLon, wptTimestamp))
-                                    inWpt = false
-                                }
-                                "trkpt", "rtept" -> if (pointTag == p.name) {
-                                    if (pointCount >= 500_000) error("Слишком много точек трека в GPX (лимит 500 000)")
-                                    points.add(UserDb.Pt(lat, lon, ele, timestamp, segment))
-                                    pointCount++
-                                    if (pointCount % 10_000 == 0) {
-                                        val progress = pointCount
-                                        runOnUiThread { if (!isFinishing && !isDestroyed) loadingText.text = "Импорт GPX: $progress точек…" }
-                                    }
-                                    pointTag = ""
-                                }
-                                "trk", "rte" -> if (inTrack) {
-                                    if (points.isNotEmpty()) {
-                                        if (tracks.size >= 10_000) error("Слишком много треков в GPX (лимит 10 000)")
-                                        tracks.add(UserDb.ImportTrack(trackName, points.toList()))
-                                    }
-                                    inTrack = false
-                                    pointTag = ""
-                                }
-                            }
-                        }
-                        ev = p.next()
-                    }
-                    if (!rootSeen) error("Пустой GPX-файл")
                 } ?: error("Не удалось открыть GPX-файл")
-
+                val waypoints = parsed.waypoints.map {
+                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs)
+                }
+                val tracks = parsed.tracks.map { track ->
+                    UserDb.ImportTrack(track.name, track.points.map { point ->
+                        UserDb.Pt(point.lat, point.lon, point.elevationM, point.timestampMs, point.segment)
+                    })
+                }
                 userDb.importGpx(waypoints, tracks)
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
