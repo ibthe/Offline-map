@@ -111,7 +111,7 @@ object MapPackages {
                 require(it == expected) { "Invalid asset name for $key" }
             }
         val emergencyNumber = properties.getProperty("emergencyNumber")?.trim()?.takeIf { it.isNotEmpty() }?.also {
-            require(it.matches(Regex("\\+?[0-9*#]{2,8}"))) { "Invalid emergency number" }
+            require(it.matches(Regex("\\+?[0-9]{2,8}"))) { "Invalid emergency number" }
         }
         val tiles = properties.getProperty("tiles")?.trim() ?: error("Missing tiles asset")
         require(tiles == "tiles.mbtiles") { "Invalid tiles asset name" }
