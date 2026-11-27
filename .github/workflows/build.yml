@@ -365,6 +365,7 @@ jobs:
       - name: Prepare synthetic routing graph for regression tests
         run: |
           python -m pip install --quiet osmium numpy
+          python -m unittest tools.tests.test_build_routing
           python tools/tests/make_test_osm.py "$RUNNER_TEMP/router-test.osm"
           python tools/build_routing.py "$RUNNER_TEMP/router-test.osm" "$RUNNER_TEMP/router-test.bin"
           echo "ROUTER_TEST_GRAPH=$RUNNER_TEMP/router-test.bin" >> "$GITHUB_ENV"
