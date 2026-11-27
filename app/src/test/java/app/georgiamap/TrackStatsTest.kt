@@ -69,6 +69,17 @@ class TrackStatsTest {
     }
 
     @Test
+    fun measuresTrackAcrossAntimeridianAlongShortArc() {
+        val result = TrackStats.calculate(listOf(listOf(
+            TrackStats.Sample(0.0, 179.9, 0.0, 1_000L),
+            TrackStats.Sample(0.0, -179.9, 0.0, 3_601_000L)
+        )))
+        assertTrue(result.distanceM in 22_000.0..23_000.0)
+        assertEquals(3_600_000L, result.movingMs)
+        assertTrue(result.averageSpeedKmh in 21.0..23.0)
+    }
+
+    @Test
     fun calculatesStatisticsForHundredThousandRecordedPoints() {
         val samples = (0 until 100_000).map {
             TrackStats.Sample(41.0 + it * 0.00001, 44.0, 100.0, 1_000L + it * 1_000L)
