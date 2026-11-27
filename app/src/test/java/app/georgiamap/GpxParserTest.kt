@@ -94,6 +94,13 @@ class GpxParserTest {
     }
 
     @Test
+    fun boundsWaypointTextDuringParsing() {
+        val note = "x".repeat(50_000)
+        val parsed = parse("<gpx><wpt lat=\"41.7\" lon=\"44.8\"><desc>$note</desc></wpt></gpx>")
+        assertEquals(2_000, parsed.waypoints.single().note.length)
+    }
+
+    @Test
     fun missingWaypointTimeRemainsMissing() {
         val parsed = parse("<gpx><wpt lat='41.7' lon='44.8'><name>Point</name></wpt></gpx>")
         assertEquals(0L, parsed.waypoints.single().timestampMs)
