@@ -429,7 +429,7 @@ class RoadGraph(buf: ByteBuffer) {
                 if (!canGo(e, dir, p)) continue
                 val v = if (dir == 0) eB[e] else eA[e]
                 if (closed[v]) continue
-                val ng = gu + edgeCost(eLen[e], e)
+                val ng = gu + edgeCost(eLen[e].toDouble(), e)
                 if (ng < g[v]) { g[v] = ng; prev[v] = code; heap.push(ng + h(v), v) }
             }
         }

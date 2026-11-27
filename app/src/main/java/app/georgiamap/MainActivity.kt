@@ -372,6 +372,7 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.navProfCar).setOnClickListener { chooseProfile(Profile.CAR) }
         findViewById<View>(R.id.navProfFoot).setOnClickListener { chooseProfile(Profile.FOOT) }
+        findViewById<View>(R.id.navProfHike).setOnClickListener { chooseProfile(Profile.HIKE) }
         findViewById<View>(R.id.navProfBike).setOnClickListener { chooseProfile(Profile.BIKE) }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -2342,7 +2343,7 @@ class MainActivity : AppCompatActivity() {
         // a chosen place offers "route here" / "route from here"; the single big button is for preview and guidance
         findViewById<View>(R.id.navPlaceActions).visibility = if (mode == NavMode.PLACE) View.VISIBLE else View.GONE
         go.visibility = if (mode == NavMode.PLACE) View.GONE else View.VISIBLE
-        listOf(R.id.navProfCar to Profile.CAR, R.id.navProfFoot to Profile.FOOT, R.id.navProfBike to Profile.BIKE).forEach { (id, p) ->
+        listOf(R.id.navProfCar to Profile.CAR, R.id.navProfFoot to Profile.FOOT, R.id.navProfHike to Profile.HIKE, R.id.navProfBike to Profile.BIKE).forEach { (id, p) ->
             val v = findViewById<TextView>(id)
             val sel = p == navProfile
             v.setBackgroundResource(if (sel) R.drawable.bg_chip_selected else R.drawable.bg_chip)
