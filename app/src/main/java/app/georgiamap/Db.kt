@@ -272,14 +272,14 @@ class PlaceDb(path: String) {
                     c.getString(3) ?: "", c.getDouble(4), c.getDouble(5), c.getInt(6))
                 val p2 = Math.toRadians(place.lat)
                 val dp = p2 - p1
-                val dl = Math.toRadians(place.lon - lon)
+                val dl = Math.toRadians(((place.lon - lon + 540.0) % 360.0) - 180.0)
                 val h = sin(dp / 2) * sin(dp / 2) +
                     cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
                 val distance = 2.0 * 6_371_008.8 * asin(sqrt(h.coerceIn(0.0, 1.0)))
                 if (distance.isFinite()) {
                     val item = NearbyPlace(place, distance)
                     if (nearest.size < maxResults) nearest.add(item)
-                    else if (distance < nearest.peek().distanceM) {
+                    else if (distance < (nearest.peek()?.distanceM ?: Double.POSITIVE_INFINITY)) {
                         nearest.poll()
                         nearest.add(item)
                     }
