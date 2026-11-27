@@ -16,6 +16,7 @@ class MapPackageTest {
         val pack = MapPackages.resolve(MapPackages.DEFAULT_ID)
         assertEquals("georgia", pack.id)
         assertEquals("GE", pack.countryCode)
+        assertEquals("112", pack.emergencyNumber)
         assertTrue(pack.bounds.contains(41.7151, 44.8271))
         assertFalse(pack.bounds.contains(50.0, 44.0))
         assertTrue(pack.assetFiles.contains(pack.tilesAsset))
@@ -44,6 +45,7 @@ class MapPackageTest {
                 """id=armenia
 title=Армения
 countryCode=AM
+emergencyNumber=112
 south=38.8
 west=43.4
 north=41.3
@@ -61,6 +63,7 @@ routing=routing.bin
             val installed = MapPackageInstaller.install(ByteArrayInputStream(bytes), root)
             assertEquals("armenia", installed.id)
             assertEquals("Армения", installed.title)
+            assertEquals("112", installed.emergencyNumber)
             assertTrue(installed.file(root, "tiles.mbtiles").isFile)
             assertEquals("armenia", MapPackages.resolve("armenia", root).id)
             assertEquals(2, MapPackages.all(root).size)
