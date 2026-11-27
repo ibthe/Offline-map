@@ -2704,6 +2704,14 @@ class MainActivity : AppCompatActivity() {
             textSize = 15f
             setTextColor(themeColorInt(R.attr.gmTextPrimary))
         })
+        session?.route?.warnings?.takeIf { it.isNotEmpty() }?.let { warnings ->
+            content.addView(android.widget.TextView(this).apply {
+                text = "Предупреждения маршрута:\\n" + warnings.joinToString("\\n")
+                textSize = 13f
+                setTextColor(themeColorInt(R.attr.gmTextPrimary))
+                setPadding(0, (8 * density).toInt(), 0, 0)
+            })
+        }
         content.addView(RouteElevationProfileView(this).apply {
             setProfile(result)
             layoutParams = android.widget.LinearLayout.LayoutParams(
