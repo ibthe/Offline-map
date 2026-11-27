@@ -80,6 +80,7 @@ drop table if exists places;
 drop table if exists places_fts;
 create table places(id integer primary key, ka text, ru text, en text, s text,
                     kind text, cls text, sub text, prio integer, ele integer, lat real, lon real);
+create index places_kind_idx on places(kind);
 """)
 rows = []
 for (ka, ru, en, kind, cls, sub, prio, ele, lat, lon) in found.values():
