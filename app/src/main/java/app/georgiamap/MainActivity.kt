@@ -2055,6 +2055,7 @@ class MainActivity : AppCompatActivity() {
                 append("Точек: ").append(stats.pointCount).append('\n')
                 if (stats.elapsedMs > 0L) append("Общее время: ").append(duration(stats.elapsedMs)).append('\n')
                 if (stats.movingMs > 0L) append("Время в движении: ").append(duration(stats.movingMs)).append('\n')
+                if (stats.stoppedMs > 0L) append("Время стоянок (по GPS): ").append(duration(stats.stoppedMs)).append('\n')
                 if (stats.elevationSamples > 1) {
                     append("Набор высоты: +").append(stats.ascentM.roundToInt()).append(" м\n")
                     append("Сброс высоты: −").append(stats.descentM.roundToInt()).append(" м\n")
