@@ -77,7 +77,6 @@ object GpxParser {
                     rootSeen = true
                 }
                 when (name) {
-                    "extensions" -> if (inWaypoint) inWaypointExtensions = false
                     "wpt" -> {
                         inWaypoint = true
                         waypointName = ""
@@ -166,6 +165,7 @@ object GpxParser {
                     }
                 }
                 when (name) {
+                    "extensions" -> if (inWaypoint) inWaypointExtensions = false
                     "wpt" -> {
                         if (waypoints.size >= MAX_WAYPOINTS) throw SAXException("Слишком много точек в GPX (лимит $MAX_WAYPOINTS)")
                         waypoints.add(Waypoint(waypointName.ifBlank { "Точка ${waypoints.size + 1}" },
