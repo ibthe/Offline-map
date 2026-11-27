@@ -51,7 +51,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 5) {
 
     fun addWaypoint(name: String, lat: Double, lon: Double, note: String = ""): Long {
         val v = ContentValues()
-        v.put("name", name); v.put("lat", lat); v.put("lon", lon); v.put("ts", System.currentTimeMillis()); v.put("note", note.trim())
+        v.put("name", name); v.put("lat", lat); v.put("lon", lon); v.put("ts", System.currentTimeMillis()); v.put("note", note.trim().take(2_000))
         return writableDatabase.insert("waypoints", null, v)
     }
 
@@ -73,7 +73,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 5) {
     }
 
     fun updateWaypointNote(id: Long, note: String) {
-        val values = ContentValues().apply { put("note", note.trim()) }
+        val values = ContentValues().apply { put("note", note.trim().take(2_000)) }
         writableDatabase.update("waypoints", values, "id=?", arrayOf(id.toString()))
     }
 
