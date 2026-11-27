@@ -29,6 +29,23 @@ class NavSessionTest {
     }
 
     @Test
+    fun tracksProgressAcrossAntimeridianAlongShortRoute() {
+        val route = RouteResult(
+            doubleArrayOf(0.0, 179.9, 0.0, -179.9),
+            22_239.0,
+            3_600.0,
+            listOf(
+                RouteStep(Maneuver.DEPART, "Старт", "", 0.0, 179.9, 0, 0.0),
+                RouteStep(Maneuver.ARRIVE, "Финиш", "", 0.0, -179.9, 1, 0.0)
+            )
+        )
+        val progress = NavSession(route, Profile.FOOT).update(0.0, -180.0)
+        assertTrue(progress.alongM in 11_000.0..11_300.0)
+        assertTrue(progress.remainingM in 11_000.0..11_300.0)
+        assertTrue(progress.offRouteM < 5.0)
+    }
+
+    @Test
     fun ordinaryRouteTracksProgress() {
         val route = RouteResult(
             doubleArrayOf(41.7, 44.8, 41.701, 44.8),
