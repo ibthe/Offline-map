@@ -35,7 +35,7 @@ def create_package(args) -> Path:
     south, west, north, east = args.bounds
     if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
         raise ValueError("Invalid bounds (expected south west north east)")
-    if not args.title or len(args.title) > 80 or any(ch in args.title for ch in "\\r\\n="):
+    if not args.title or len(args.title) > 80 or any(ch in args.title for ch in "\r\n="):
         raise ValueError("Title must contain 1-80 characters and cannot contain newlines or '='")
 
     selected = []

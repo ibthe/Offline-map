@@ -45,7 +45,7 @@ class MapPackageBuilderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_package(self.args(id="../escape"))
         with self.assertRaises(ValueError):
-            create_package(self.args(title="Armenia\\nInjected=value"))
+            create_package(self.args(title="Armenia\nInjected=value"))
 
     def test_rejects_invalid_asset_header(self):
         self.tiles.write_bytes(b"not a database")
