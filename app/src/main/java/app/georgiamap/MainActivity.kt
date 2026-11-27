@@ -1425,9 +1425,9 @@ class MainActivity : AppCompatActivity() {
         val hasFreshFix = location != null &&
             LocationQuality.isFresh(location.time, now, 30_000L) &&
             location.latitude.isFinite() && location.longitude.isFinite()
-        val coordinates = if (hasFreshFix && location != null) {
-            Geo.fmtCoord(location.latitude, location.longitude)
-        } else "Нет свежих координат GPS"
+        val coordinates = location?.takeIf { hasFreshFix }?.let {
+            Geo.fmtCoord(it.latitude, it.longitude)
+        } ?: "Нет свежих координат GPS"
         val accuracy = location?.accuracy?.takeIf { it.isFinite() && it > 0f }
         val ageSeconds = location?.let { ((now - it.time).coerceAtLeast(0L) / 1000L) }
         val status = if (hasFreshFix) {

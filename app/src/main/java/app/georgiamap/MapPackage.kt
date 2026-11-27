@@ -43,7 +43,7 @@ object MapPackages {
         id = DEFAULT_ID,
         title = "Грузия",
         countryCode = "GE",
-        bounds = MapBounds(south = 41.0, west = 40.0, north = 46.8, east = 43.65),
+        bounds = MapBounds(south = 41.0, west = 40.0, north = 43.65, east = 46.8),
         tilesAsset = "georgia.mbtiles",
         placesAsset = "places.db",
         reliefAsset = "relief.mbtiles",
