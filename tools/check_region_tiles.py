@@ -4,6 +4,7 @@ import sqlite3
 import sys
 
 import mvt
+from build_glyphs import fields
 
 path = sys.argv[1]
 db = sqlite3.connect(path)
@@ -25,7 +26,7 @@ try:
     ), 1):
         raw = mvt.unzip(blob)
         for name, layer in mvt.layers(raw):
-            layers[name] = layers.get(name, 0) + sum(1 for field, _, _ in mvt_fields(layer) if field == 2)
+            layers[name] = layers.get(name, 0) + sum(1 for field, _, _ in fields(layer) if field == 2)
             if name in ("place", "poi", "mountain_peak", "aerodrome_label", "water_name"):
                 features, _ = mvt.point_features(layer)
                 named_points += sum(1 for props, _, _ in features
@@ -44,7 +45,3 @@ finally:
     db.close()
 
 
-def mvt_fields(layer):
-    # mvt.fields is the shared protobuf field iterator used by the local MVT reader.
-    from build_glyphs import fields
-    return fields(layer)
