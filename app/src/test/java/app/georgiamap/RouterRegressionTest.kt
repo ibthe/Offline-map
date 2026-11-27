@@ -121,6 +121,21 @@ class RouterRegressionTest {
     }
 
     @Test
+    fun shortestAndFastestPreferencesReturnValidRoutes() {
+        val g = graph()
+        val (aLat, aLon) = point(0.0, 0.0)
+        val (bLat, bLon) = point(3.0, 3.0)
+        val fastest = g.route(aLat, aLon, bLat, bLon, Profile.CAR, RoutePreference.FASTEST)
+        val shortest = g.route(aLat, aLon, bLat, bLon, Profile.CAR, RoutePreference.SHORTEST)
+
+        assertNotNull(fastest)
+        assertNotNull(shortest)
+        assertTrue(shortest!!.distanceM <= fastest!!.distanceM + 1.0)
+        assertTrue(fastest.timeS <= shortest.timeS + 1.0)
+        assertNull(g.route(aLat, aLon, bLat, bLon, Profile.CAR, 99))
+    }
+
+    @Test
     fun roundaboutInstructionsCountTheActualExit() {
         val g = graph()
         val cx = lon0 + dLon

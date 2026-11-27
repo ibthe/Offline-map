@@ -18,6 +18,11 @@ object Profile {
     const val HIKE = 3
 }
 
+object RoutePreference {
+    const val FASTEST = 0
+    const val SHORTEST = 1
+}
+
 object Maneuver {
     const val DEPART = 0
     const val STRAIGHT = 1
@@ -317,8 +322,11 @@ class RoadGraph(buf: ByteBuffer) {
     private class Leg(val e: Int, val dir: Int, val from: Int, val to: Int, var lenM: Double, var i0: Int = 0, var i1: Int = 0)
 
     @Synchronized
-    fun route(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int): RouteResult? {
-        if (p !in Profile.CAR..Profile.HIKE) return null
+    fun route(
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double,
+        p: Int, preference: Int = RoutePreference.FASTEST
+    ): RouteResult? {
+        if (p !in Profile.CAR..Profile.HIKE || preference !in RoutePreference.FASTEST..RoutePreference.SHORTEST) return null
         if (!fromLat.isFinite() || !fromLon.isFinite() || !toLat.isFinite() || !toLon.isFinite()) return null
         if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 ||
             fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) return null
@@ -338,7 +346,10 @@ class RoadGraph(buf: ByteBuffer) {
 
         val pairs = ArrayList<Pair<Snap, Snap>>()
         for (a in startCandidates) for (b in endCandidates) pairs.add(a to b)
-        pairs.sortBy { it.first.dist + it.second.dist }
+        fun connectorCost(a: Snap, b: Snap) =
+            if (preference == RoutePreference.SHORTEST) a.dist + b.dist
+            else (a.dist + b.dist) / connectorSpeedMs(p)
+        pairs.sortBy { connectorCost(it.first, it.second) }
 
         // Evaluate every candidate pair. The closest pair of roads is not necessarily
         // connected, nor does it necessarily produce the fastest complete route.
@@ -347,8 +358,8 @@ class RoadGraph(buf: ByteBuffer) {
         var bestCost = Double.MAX_VALUE
         for ((s, t) in pairs) {
             // Connector time alone is a lower bound; skip pairs that cannot beat the best route.
-            if ((s.dist + t.dist) / connectorSpeedMs(p) >= bestCost) continue
-            val candidate = search(fromLat, fromLon, toLat, toLon, p, s, t) ?: continue
+            if (connectorCost(s, t) >= bestCost) continue
+            val candidate = search(fromLat, fromLon, toLat, toLon, p, preference, s, t) ?: continue
             val cost = candidate.timeS
             if (cost < bestCost) {
                 best = candidate
@@ -358,42 +369,50 @@ class RoadGraph(buf: ByteBuffer) {
         return best
     }
 
-    private fun search(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap): RouteResult? {
+    private fun search(
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double,
+        p: Int, preference: Int, s: Snap, t: Snap
+    ): RouteResult? {
         if (g.size != nN) { g = DoubleArray(nN); prev = IntArray(nN); closed = BooleanArray(nN) }
         java.util.Arrays.fill(g, Double.MAX_VALUE)
         java.util.Arrays.fill(prev, -2)
         java.util.Arrays.fill(closed, false)
 
+        val shortest = preference == RoutePreference.SHORTEST
         val vmax = when (p) { Profile.CAR -> 130.0 / 3.6 + 1e-6; Profile.FOOT, Profile.HIKE -> 1.5; else -> 8.0 }
         val graphMinLat = gridLat0.toDouble() / 1e6
         val graphMaxLat = (gridLat0.toDouble() + rows.toDouble() * cell) / 1e6
         val maxAbsLat = max(abs(toLat), max(abs(graphMinLat), abs(graphMaxLat)))
         val tkx = mLon(maxAbsLat)
-        fun h(v: Int) = hypot((lo(v) - toLon) * tkx, (la(v) - toLat) * M_LAT) / vmax
+        fun edgeCost(m: Double, edge: Int) = if (shortest) m else m / speedMs(edge, p)
+        fun h(v: Int): Double {
+            val d = hypot((lo(v) - toLon) * tkx, (la(v) - toLat) * M_LAT)
+            return if (shortest) d else d / vmax
+        }
 
         val heap = Heap()
         val sp = speedMs(s.e, p)
         if (canGo(s.e, 0, p)) {                       // leave through B
-            val v = eB[s.e]; val c = (s.geomLen - s.off) / sp
+            val v = eB[s.e]; val c = edgeCost(s.geomLen - s.off, s.e)
             if (c < g[v]) { g[v] = c; prev[v] = -1; heap.push(c + h(v), v) }
         }
         if (canGo(s.e, 1, p)) {                       // leave through A
-            val v = eA[s.e]; val c = s.off / sp
+            val v = eA[s.e]; val c = edgeCost(s.off, s.e)
             if (c < g[v]) { g[v] = c; prev[v] = -1; heap.push(c + h(v), v) }
         }
         val tp = speedMs(t.e, p)
         val attachA = eA[t.e]
         val attachB = eB[t.e]
-        val extraA = if (canGo(t.e, 0, p)) t.off / tp else Double.MAX_VALUE            // A -> T moving forward
-        val extraB = if (canGo(t.e, 1, p)) (t.geomLen - t.off) / tp else Double.MAX_VALUE // B -> T moving backward
+        val extraA = if (canGo(t.e, 0, p)) edgeCost(t.off, t.e) else Double.MAX_VALUE            // A -> T moving forward
+        val extraB = if (canGo(t.e, 1, p)) edgeCost(t.geomLen - t.off, t.e) else Double.MAX_VALUE // B -> T moving backward
 
         var best = Double.MAX_VALUE
         var bestNode = -1
         var bestViaA = true
         var direct = false
         if (s.e == t.e) {
-            if (s.off <= t.off && canGo(s.e, 0, p)) { best = (t.off - s.off) / sp; direct = true }
-            else if (s.off >= t.off && canGo(s.e, 1, p)) { best = (s.off - t.off) / sp; direct = true }
+            if (s.off <= t.off && canGo(s.e, 0, p)) { best = edgeCost(t.off - s.off, s.e); direct = true }
+            else if (s.off >= t.off && canGo(s.e, 1, p)) { best = edgeCost(s.off - t.off, s.e); direct = true }
         }
 
         while (heap.size > 0) {
@@ -412,7 +431,7 @@ class RoadGraph(buf: ByteBuffer) {
                 if (!canGo(e, dir, p)) continue
                 val v = if (dir == 0) eB[e] else eA[e]
                 if (closed[v]) continue
-                val ng = gu + eLen[e] / speedMs(e, p)
+                val ng = gu + edgeCost(eLen[e], e)
                 if (ng < g[v]) { g[v] = ng; prev[v] = code; heap.push(ng + h(v), v) }
             }
         }

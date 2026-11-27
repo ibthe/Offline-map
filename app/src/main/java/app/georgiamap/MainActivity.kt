@@ -120,6 +120,7 @@ class MainActivity : AppCompatActivity() {
     private var navDest: LatLng? = null
     private var navDestName = ""
     private var navProfile = Profile.CAR
+    private var routePreference = RoutePreference.FASTEST
     @Volatile private var graph: RoadGraph? = null
     private var session: NavSession? = null
     private var routeFrom: LatLng? = null
@@ -317,6 +318,7 @@ class MainActivity : AppCompatActivity() {
 
         setupChips()
         navProfile = prefs.getInt("nav_profile", Profile.CAR).coerceIn(Profile.CAR, Profile.HIKE)
+        routePreference = prefs.getInt("route_preference", RoutePreference.FASTEST).coerceIn(RoutePreference.FASTEST, RoutePreference.SHORTEST)
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
         refreshRecButton()
         findViewById<View>(R.id.btnRouteTo).setOnClickListener {
@@ -1392,6 +1394,7 @@ class MainActivity : AppCompatActivity() {
                     MenuRow.Toggle("Голосовые подсказки", "Нужен русский голос в системе",
                         prefs.getBoolean("nav_voice", true)) { on -> prefs.edit().putBoolean("nav_voice", on).apply() },
                     MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() },
+                    MenuRow.Link("Предпочтение маршрута", routePreferenceName(routePreference)) { showRoutePreferenceDialog() },
                     MenuRow.Link("Экспедиция и безопасность", "GPS · координаты · запись трека") { showExpeditionPanel() }
                 )),
                 MenuSection("Мои данные", listOf(
@@ -2269,6 +2272,21 @@ class MainActivity : AppCompatActivity() {
         if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
     }
 
+    private fun routePreferenceName(value: Int) =
+        if (value == RoutePreference.SHORTEST) "Короче" else "Быстрее"
+
+    private fun showRoutePreferenceDialog() {
+        val values = arrayOf("Быстрее", "Короче")
+        MaterialAlertDialogBuilder(this).setTitle("Предпочтение маршрута")
+            .setSingleChoiceItems(values, routePreference) { dialog, which ->
+                routePreference = which
+                prefs.edit().putInt("route_preference", which).apply()
+                dialog.dismiss()
+                if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
+            }
+            .setNegativeButton("Закрыть", null).show()
+    }
+
     private fun fmtDur(sec: Double): String {
         val m = (sec / 60).roundToInt().coerceAtLeast(1)
         return if (m < 60) "$m мин" else "${m / 60} ч ${m % 60} мин"
@@ -2287,6 +2305,7 @@ class MainActivity : AppCompatActivity() {
     private fun setSummary(remM: Double, remS: Double, note: String = "") {
         findViewById<TextView>(R.id.navMain).text = Geo.fmtDist(remM) + " · " + fmtDur(remS)
         findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
+            " · " + routePreferenceName(routePreference) +
             (if (pendingFrom != null) "\nот «$pendingFromName»" else "") +
             (if (navDestName.isNotBlank()) "\n→ $navDestName" else "") +
             (if (note.isNotEmpty()) "\n$note" else "")
@@ -2393,7 +2412,7 @@ class MainActivity : AppCompatActivity() {
                         RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
                     }.also { graph = it }
                 }
-                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile)
+                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile, routePreference)
                 runOnUiThread {
                     if (requestId == routeRequestId && !isFinishing && !isDestroyed) {
                         done(r, if (r == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null)
