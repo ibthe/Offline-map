@@ -1651,14 +1651,19 @@ class MainActivity : AppCompatActivity() {
         progress.setOnCancelListener { if (generation == safetyLookupGeneration) safetyLookupGeneration++ }
         progress.show()
         thread(name = "nearby-safety-places") {
-            val nearby = try {
-                db.nearbyKinds(lat, lon, listOf(
-                    "hospital", "clinic", "doctors", "dentist", "police", "fire_station", "emergency",
-                    "city", "town", "village", "hamlet", "suburb", "isolated_dwelling"
-                ), 20)
+            val groups = try {
+                listOf(
+                    "Медицина" to db.nearbyKinds(lat, lon,
+                        listOf("hospital", "clinic", "doctors", "dentist"), 5),
+                    "Полиция и пожарные службы" to db.nearbyKinds(lat, lon,
+                        listOf("police", "fire_station", "emergency"), 5),
+                    "Населённые пункты" to db.nearbyKinds(lat, lon,
+                        listOf("city", "town", "village", "hamlet", "suburb", "isolated_dwelling"), 5)
+                )
             } catch (_: Exception) {
                 emptyList()
             }
+            val nearby = groups.flatMap { (category, places) -> places.map { category to it } }
             runOnUiThread {
                 if (generation != safetyLookupGeneration || isFinishing || isDestroyed) return@runOnUiThread
                 progress.dismiss()
@@ -1669,24 +1674,15 @@ class MainActivity : AppCompatActivity() {
                         .setPositiveButton("Закрыть", null).show()
                     return@runOnUiThread
                 }
-                fun kindLabel(kind: String) = when (kind) {
-                    "hospital" -> "Больница"
-                    "clinic", "doctors", "dentist" -> "Медицинская помощь"
-                    "police" -> "Полиция"
-                    "fire_station" -> "Пожарная служба"
-                    "emergency" -> "Экстренная служба"
-                    "city", "town", "village", "hamlet", "suburb", "isolated_dwelling" -> "Населённый пункт"
-                    else -> "Объект"
-                }
-                val labels = nearby.map { item ->
+                val labels = nearby.map { (category, item) ->
                     val p = item.place
                     val name = p.ru.ifBlank { p.ka.ifBlank { p.en } }
-                    "${kindLabel(p.kind)} · $name\n${Geo.fmtDist(item.distanceM)}"
+                    "$category · $name\n${Geo.fmtDist(item.distanceM)}"
                 }.toTypedArray()
                 MaterialAlertDialogBuilder(this)
                     .setTitle("Ближайшие объекты · офлайн")
                     .setItems(labels) { _, index ->
-                        val place = nearby[index].place
+                        val place = nearby[index].second.place
                         val target = LatLng(place.lat, place.lon)
                         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.0))
                         val name = place.ru.ifBlank { place.ka.ifBlank { place.en } }
