@@ -92,6 +92,7 @@ object RouteAnalysis {
 
     fun calculate(samples: List<Sample>, distanceM: Double = samples.lastOrNull()?.distanceM ?: 0.0): Result {
         require(distanceM.isFinite() && distanceM >= 0.0)
+        require(samples.all { it.distanceM.isFinite() && it.distanceM >= 0.0 })
         require(samples.zipWithNext().all { (a, b) ->
             a.distanceM.isFinite() && b.distanceM.isFinite() && b.distanceM >= a.distanceM
         })
@@ -102,7 +103,7 @@ object RouteAnalysis {
                 null, null, coverage, samples.toList(), emptyList(), Difficulty.UNKNOWN)
         }
 
-        // Route samples are already spaced (normally 100 m), which reduces pixel noise
+        // Route samples are already spaced (typically 50–100 m), which reduces pixel noise
         // while retaining short steep sections that a broad median filter could erase.
         val profileSamples = samples.map { s ->
             Sample(s.distanceM, s.elevationM?.takeIf { it.isFinite() })
