@@ -373,6 +373,9 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon -ProuterTestGraph="$ROUTER_TEST_GRAPH" :app:testDebugUnitTest
 
+      - name: Run Android lint
+        run: gradle --no-daemon :app:lintDebug
+
       - name: Build APK
         run: gradle --no-daemon -Pvcode=${{ github.run_number }} -PmapDataVersion=${{ steps.data.outputs.version }} :app:assembleDebug
 
