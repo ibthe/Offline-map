@@ -28,15 +28,15 @@ internal class TrackPauseDetector(
         val accuracy = accuracyM.takeIf { it.isFinite() && it > 0.0 } ?: 10.0
         val current = Fix(lat, lon, timeMs, accuracy)
         val prior = previous
-        if (!enabled) {
-            previous = current
-            return Event.RECORD
-        }
         if (prior == null) {
             previous = current
             return Event.RECORD
         }
         if (timeMs <= prior.timeMs) return Event.SKIP
+        if (!enabled) {
+            previous = current
+            return Event.RECORD
+        }
 
         if (isPaused) {
             val anchor = pauseAnchor ?: prior
