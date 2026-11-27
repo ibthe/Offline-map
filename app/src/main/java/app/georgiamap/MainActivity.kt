@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private var elevationGeneration = 0
     private var elevationTask: Runnable? = null
     private var waypointRenderGeneration = 0
+    private var waypointLoadGeneration = 0
     private var waypointViewportTask: Runnable? = null
     private var trackRenderGeneration = 0
     private var listLoadGeneration = 0
@@ -476,6 +477,7 @@ class MainActivity : AppCompatActivity() {
         searchGeneration++
         elevationGeneration++
         waypointRenderGeneration++
+        waypointLoadGeneration++
         trackRenderGeneration++
         listLoadGeneration++
         diagnosticsGeneration++
@@ -1099,11 +1101,11 @@ class MainActivity : AppCompatActivity() {
     private fun src(id: String): GeoJsonSource? = style?.getSourceAs<GeoJsonSource>(id)
 
     private fun refreshWaypoints() {
-        val generation = ++waypointRenderGeneration
+        val generation = ++waypointLoadGeneration
         thread(name = "waypoint-cache-load") {
             val points = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
             runOnUiThread {
-                if (generation == waypointRenderGeneration && !isFinishing && !isDestroyed) {
+                if (generation == waypointLoadGeneration && !isFinishing && !isDestroyed) {
                     waypointCache = points
                     scheduleWaypointViewportRender()
                 }
