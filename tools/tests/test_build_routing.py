@@ -56,6 +56,12 @@ class WayAccessTests(unittest.TestCase):
         self.assertTrue(bit(explicit_two_way, 0))
         self.assertTrue(bit(explicit_two_way, 3))
 
+    def test_toll_road_tag_is_encoded(self):
+        toll = flags({"toll": "yes"})
+        self.assertTrue(bit(toll, 26))
+        free = flags({"toll": "no"})
+        self.assertFalse(bit(free, 26))
+
     def test_tracktype_and_smoothness_are_encoded_for_terrain_avoidance(self):
         rough = flags({"surface": "gravel", "tracktype": "grade5", "smoothness": "bad"})
         self.assertTrue(bit(rough, 19))
