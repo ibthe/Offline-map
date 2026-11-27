@@ -65,9 +65,11 @@ class GpxParserTest {
             <wpt lat="41.7" lon="44.8">
                 <name>Camp</name>
                 <desc>Water nearby &amp; sheltered from wind</desc>
+                <type>Кемпинг</type>
             </wpt>
         </gpx>""")
         assertEquals("Water nearby & sheltered from wind", parsed.waypoints.single().note)
+        assertEquals("Кемпинг", parsed.waypoints.single().category)
     }
 
     @Test
