@@ -33,7 +33,7 @@ object LocationQuality {
     ): Boolean {
         if (candidateTimeMs <= 0L || candidateTimeMs > nowMs + MAX_FUTURE_SKEW_MS ||
             nowMs - candidateTimeMs > MAX_CANDIDATE_AGE_MS ||
-            candidateAccuracyM.isNaN() || candidateAccuracyM < 0f) return false
+            !candidateAccuracyM.isFinite() || candidateAccuracyM <= 0f) return false
         if (currentTimeMs <= 0L) return true
 
         val currentIsFresh = isFresh(currentTimeMs, nowMs, CURRENT_FIX_PROTECTION_MS)

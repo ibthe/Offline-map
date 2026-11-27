@@ -109,6 +109,25 @@ class RoadGraph(buf: ByteBuffer) {
         rows = buf.int
         cols = buf.int
         val nGrid = buf.int
+
+        // Imported regional packages are external input. Validate the complete binary
+        // layout before allocating arrays from counts stored in the file header.
+        require(nN >= 2 && nM >= 1 && nP >= 2L * nM && nNames >= 1 && nameLen >= 0 &&
+            cell > 0 && rows > 0 && cols > 0 && nGrid >= nM) { "invalid routing graph dimensions" }
+        val gridCells = Math.multiplyExact(rows.toLong(), cols.toLong())
+        var expectedPayload = 0L
+        fun addArray(count: Long, bytesPerItem: Long) {
+            expectedPayload = Math.addExact(expectedPayload, Math.multiplyExact(count, bytesPerItem))
+        }
+        addArray(2L * nN, 4L)                 // node latitude / longitude
+        addArray(5L * nM + nM + 1L, 4L)      // edge arrays and geometry offsets
+        addArray(2L * nP, 4L)                 // geometry coordinates
+        addArray(gridCells + 1L, 4L)          // grid offsets
+        addArray(nGrid.toLong(), 4L)          // grid edge references
+        addArray(nNames.toLong() + 1L, 4L)   // name offsets
+        addArray(nameLen.toLong(), 1L)        // UTF-8 name bytes
+        require(expectedPayload == buf.remaining().toLong()) { "routing graph size does not match its header" }
+
         nodeLat = ints(buf, nN)
         nodeLon = ints(buf, nN)
         eA = ints(buf, nM)
@@ -123,6 +142,24 @@ class RoadGraph(buf: ByteBuffer) {
         gridEdge = ints(buf, nGrid)
         nameOff = ints(buf, nNames + 1)
         nameBytes = ByteArray(nameLen).also { buf.get(it) }
+
+        require(nodeLat.all { it in -90_000_000..90_000_000 } &&
+            nodeLon.all { it in -180_000_000..180_000_000 }) { "routing graph contains invalid node coordinates" }
+        require(eA.indices.all { eA[it] in 0 until nN && eB[it] in 0 until nN &&
+            eA[it] != eB[it] && eLen[it].isFinite() && eLen[it] > 0f &&
+            eName[it] in 0 until nNames }) { "routing graph contains invalid edges" }
+        require(geomOff.first() == 0 && geomOff.last() == nP &&
+            geomOff.indices.dropLast(1).all { geomOff[it] >= 0 &&
+                geomOff[it + 1] - geomOff[it] >= 2 }) { "routing graph geometry offsets are invalid" }
+        require(gLat.all { it in -90_000_000..90_000_000 } &&
+            gLon.all { it in -180_000_000..180_000_000 }) { "routing graph contains invalid geometry coordinates" }
+        require(gridOff.first() == 0 && gridOff.last() == nGrid &&
+            gridOff.indices.dropLast(1).all { gridOff[it] >= 0 && gridOff[it + 1] >= gridOff[it] } &&
+            gridEdge.all { it in 0 until nM }) { "routing graph grid index is invalid" }
+        require(nameOff.first() == 0 && nameOff.last() == nameLen &&
+            nameOff.indices.dropLast(1).all { nameOff[it] >= 0 && nameOff[it + 1] >= nameOff[it] }) {
+            "routing graph name index is invalid"
+        }
 
         val deg = IntArray(nN + 1)
         for (e in 0 until nM) { deg[eA[e] + 1]++; deg[eB[e] + 1]++ }
