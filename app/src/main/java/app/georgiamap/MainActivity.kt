@@ -2300,17 +2300,112 @@ class MainActivity : AppCompatActivity() {
             toast("Вы уже у пункта назначения — маршрут не требуется")
             return
         }
-        computeRoute(from, dest, false) { r, err ->
-            if (r == null) {
+        computeRouteOptions(from, dest) { fastest, shortest, err ->
+            val preferred = if (routePreference == RoutePreference.FASTEST) fastest else shortest
+            val alternative = if (routePreference == RoutePreference.FASTEST) shortest else fastest
+            if (preferred == null && alternative == null) {
                 toast(err ?: "Маршрут не найден")
                 updateNavUi()
-                return@computeRoute
+                return@computeRouteOptions
             }
-            session = NavSession(r, navProfile)
-            drawRoute(r)
-            fitRoute(r)
-            navMode = NavMode.PREVIEW
-            updateNavUi()
+            if (preferred == null || alternative == null || !routesMeaningfullyDifferent(preferred, alternative)) {
+                showRoutePreview(preferred ?: alternative!!)
+                return@computeRouteOptions
+            }
+
+            val options = if (routePreference == RoutePreference.FASTEST)
+                listOf(fastest!!, shortest!!) else listOf(shortest!!, fastest!!)
+            val labels = if (routePreference == RoutePreference.FASTEST)
+                arrayOf(routeOptionLabel("Быстрее", options[0]), routeOptionLabel("Короче", options[1]))
+            else arrayOf(routeOptionLabel("Короче", options[0]), routeOptionLabel("Быстрее", options[1]))
+            MaterialAlertDialogBuilder(this).setTitle("Выберите маршрут")
+                .setItems(labels) { _, index -> showRoutePreview(options[index]) }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
+    }
+
+    /** Calculates fastest and shortest candidates so the user can choose a genuinely different route. */
+    private fun computeRouteOptions(
+        from: LatLng, to: LatLng,
+        done: (fastest: RouteResult?, shortest: RouteResult?, error: String?) -> Unit
+    ) {
+        val requestId = ++routeRequestId
+        val f = mapPackage.routingAsset?.let { File(filesDir, it) }
+        if (f == null || !f.isFile) {
+            if (requestId == routeRequestId) done(null, null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
+            return
+        }
+        val profile = navProfile
+        findViewById<TextView>(R.id.navSub).text =
+            if (graph == null) "Загружаю дорожные данные…" else "Ищу варианты маршрута…"
+        thread(name = "routing-options") {
+            try {
+                val g = graph ?: synchronized(this@MainActivity) {
+                    graph ?: RandomAccessFile(f, "r").use { raf ->
+                        RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
+                    }.also { graph = it }
+                }
+                val fastest = g.route(from.latitude, from.longitude, to.latitude, to.longitude,
+                    profile, RoutePreference.FASTEST)
+                val shortest = g.route(from.latitude, from.longitude, to.latitude, to.longitude,
+                    profile, RoutePreference.SHORTEST)
+                runOnUiThread {
+                    if (requestId == routeRequestId && !isFinishing && !isDestroyed) {
+                        done(fastest, shortest,
+                            if (fastest == null && shortest == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null)
+                    }
+                }
+            } catch (e: Throwable) {
+                runOnUiThread {
+                    if (requestId == routeRequestId && !isFinishing && !isDestroyed)
+                        done(null, null, "Ошибка маршрутизации: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun showRoutePreview(route: RouteResult) {
+        session = NavSession(route, navProfile)
+        drawRoute(route)
+        fitRoute(route)
+        navMode = NavMode.PREVIEW
+        updateNavUi()
+    }
+
+    private fun routeOptionLabel(label: String, route: RouteResult): String {
+        val minutes = kotlin.math.ceil(route.timeS.coerceAtLeast(0.0) / 60.0).toInt()
+        val duration = if (minutes >= 60) "${minutes / 60} ч ${minutes % 60} мин" else "${minutes} мин"
+        return "$label · ${Geo.fmtDist(route.distanceM)} · $duration"
+    }
+
+    private fun routesMeaningfullyDifferent(a: RouteResult, b: RouteResult): Boolean {
+        if (kotlin.math.abs(a.distanceM - b.distanceM) > maxOf(150.0, minOf(a.distanceM, b.distanceM) * 0.05))
+            return true
+        fun pointAt(route: RouteResult, fraction: Double): LatLng {
+            if (route.pointCount <= 1) return LatLng(route.lat(0), route.lon(0))
+            val cumulative = DoubleArray(route.pointCount)
+            for (i in 1 until route.pointCount) {
+                val midLat = (route.lat(i - 1) + route.lat(i)) / 2.0
+                val dx = (route.lon(i) - route.lon(i - 1)) * 111320.0 * Math.cos(Math.toRadians(midLat))
+                val dy = (route.lat(i) - route.lat(i - 1)) * 110574.0
+                cumulative[i] = cumulative[i - 1] + kotlin.math.hypot(dx, dy)
+            }
+            val target = cumulative.last() * fraction
+            val index = (1 until route.pointCount).firstOrNull { cumulative[it] >= target } ?: route.pointCount - 1
+            val length = cumulative[index] - cumulative[index - 1]
+            val t = if (length > 0.0) ((target - cumulative[index - 1]) / length).coerceIn(0.0, 1.0) else 0.0
+            return LatLng(
+                route.lat(index - 1) + (route.lat(index) - route.lat(index - 1)) * t,
+                route.lon(index - 1) + (route.lon(index) - route.lon(index - 1)) * t
+            )
+        }
+        return listOf(0.25, 0.5, 0.75).any { fraction ->
+            val p = pointAt(a, fraction)
+            val q = pointAt(b, fraction)
+            val distance = FloatArray(1)
+            Location.distanceBetween(p.latitude, p.longitude, q.latitude, q.longitude, distance)
+            distance[0] > 100f
         }
     }
 
