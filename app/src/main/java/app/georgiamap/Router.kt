@@ -112,9 +112,14 @@ class RoadGraph(buf: ByteBuffer) {
 
         // Imported regional packages are external input. Validate the complete binary
         // layout before allocating arrays from counts stored in the file header.
-        require(nN >= 2 && nM >= 1 && nP >= 2L * nM && nNames >= 1 && nameLen >= 0 &&
-            cell > 0 && rows > 0 && cols > 0 && nGrid >= nM) { "invalid routing graph dimensions" }
-        val gridCells = Math.multiplyExact(rows.toLong(), cols.toLong())
+        require(nN in 2 until Int.MAX_VALUE && nM in 1..(Int.MAX_VALUE / 2) &&
+            nP >= 2L * nM && nNames in 1 until Int.MAX_VALUE && nameLen >= 0 &&
+            cell > 0 && rows > 0 && cols > 0 && nGrid in nM until Int.MAX_VALUE) {
+            "invalid routing graph dimensions"
+        }
+        val gridCells = try { Math.multiplyExact(rows.toLong(), cols.toLong()) }
+            catch (_: ArithmeticException) { throw IllegalArgumentException("routing graph grid dimensions overflow") }
+        require(gridCells in 1 until Int.MAX_VALUE.toLong()) { "routing graph grid is too large" }
         var expectedPayload = 0L
         fun addArray(count: Long, bytesPerItem: Long) {
             expectedPayload = Math.addExact(expectedPayload, Math.multiplyExact(count, bytesPerItem))
@@ -149,15 +154,15 @@ class RoadGraph(buf: ByteBuffer) {
             eA[it] != eB[it] && eLen[it].isFinite() && eLen[it] > 0f &&
             eName[it] in 0 until nNames }) { "routing graph contains invalid edges" }
         require(geomOff.first() == 0 && geomOff.last() == nP &&
-            geomOff.indices.dropLast(1).all { geomOff[it] >= 0 &&
+            (0 until geomOff.size - 1).all { geomOff[it] >= 0 &&
                 geomOff[it + 1] - geomOff[it] >= 2 }) { "routing graph geometry offsets are invalid" }
         require(gLat.all { it in -90_000_000..90_000_000 } &&
             gLon.all { it in -180_000_000..180_000_000 }) { "routing graph contains invalid geometry coordinates" }
         require(gridOff.first() == 0 && gridOff.last() == nGrid &&
-            gridOff.indices.dropLast(1).all { gridOff[it] >= 0 && gridOff[it + 1] >= gridOff[it] } &&
+            (0 until gridOff.size - 1).all { gridOff[it] >= 0 && gridOff[it + 1] >= gridOff[it] } &&
             gridEdge.all { it in 0 until nM }) { "routing graph grid index is invalid" }
         require(nameOff.first() == 0 && nameOff.last() == nameLen &&
-            nameOff.indices.dropLast(1).all { nameOff[it] >= 0 && nameOff[it + 1] >= nameOff[it] }) {
+            (0 until nameOff.size - 1).all { nameOff[it] >= 0 && nameOff[it + 1] >= nameOff[it] }) {
             "routing graph name index is invalid"
         }
 

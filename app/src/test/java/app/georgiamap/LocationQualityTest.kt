@@ -41,5 +41,7 @@ class LocationQualityTest {
         assertFalse(LocationQuality.shouldAccept(0L, 5f, 0L, 0f, now))
         assertFalse(LocationQuality.shouldAccept(now - 121_000L, 5f, 0L, 0f, now))
         assertFalse(LocationQuality.shouldAccept(now, Float.NaN, 0L, 0f, now))
+        assertFalse(LocationQuality.shouldAccept(now, 0f, 0L, 0f, now))
+        assertFalse(LocationQuality.shouldAccept(now, Float.POSITIVE_INFINITY, 0L, 0f, now))
     }
 }
