@@ -32,7 +32,7 @@ jobs:
         id: planetiler
         run: |
           version="$(tr -d '[:space:]' < tools/planetiler_version.txt)"
-          if [[ ! "$version" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Invalid Planetiler version: $version"
             exit 1
           fi
