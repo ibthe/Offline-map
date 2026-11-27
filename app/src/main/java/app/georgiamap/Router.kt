@@ -587,13 +587,13 @@ class RoadGraph(buf: ByteBuffer) {
         legs.last().i1 = pts.n - 1
         val real = legs.filter { it.lenM >= 2.0 }
         val warnings = ArrayList<String>()
-        if ((avoidance and RouteAvoidance.UNPAVED) != 0 && legs.any { isUnpaved(it.e) })
+        if ((avoidance and RouteAvoidance.UNPAVED) != 0 && real.any { isUnpaved(it.e) })
             warnings.add("В маршруте остались грунтовые или неасфальтированные участки")
-        if ((avoidance and RouteAvoidance.STEPS) != 0 && legs.any { cls(it.e) == 9 })
+        if ((avoidance and RouteAvoidance.STEPS) != 0 && real.any { cls(it.e) == 9 })
             warnings.add("В маршруте остались лестницы")
-        if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && legs.any { isDifficult(it.e) })
+        if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && real.any { isDifficult(it.e) })
             warnings.add("В маршруте остались тропы с низким качеством покрытия")
-        if ((avoidance and RouteAvoidance.TOLLS) != 0 && legs.any { isToll(it.e) })
+        if ((avoidance and RouteAvoidance.TOLLS) != 0 && real.any { isToll(it.e) })
             warnings.add("В маршруте остались платные дороги")
         return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist),
             s.dist, t.dist, preferenceCost, warnings)
