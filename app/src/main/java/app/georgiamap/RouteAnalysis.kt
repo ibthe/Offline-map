@@ -78,14 +78,22 @@ object RouteAnalysis {
         else targets[targets.lastIndex] = total
 
         return targets.map { target ->
-            val idx = (1 until cumulative.size).firstOrNull { cumulative[it] >= target }
-                ?: cumulative.lastIndex
+            // Lower-bound search avoids rescanning the whole route for each elevation sample.
+            var low = 1
+            var high = cumulative.lastIndex
+            while (low < high) {
+                val mid = (low + high) ushr 1
+                if (cumulative[mid] < target) low = mid + 1 else high = mid
+            }
+            val idx = low
             val segment = cumulative[idx] - cumulative[idx - 1]
             val t = if (segment > 0.0) ((target - cumulative[idx - 1]) / segment).coerceIn(0.0, 1.0) else 0.0
             val a = points[idx - 1]
             val b = points[idx]
             val lat = a.lat + (b.lat - a.lat) * t
-            val lon = a.lon + (b.lon - a.lon) * t
+            // Interpolate across the short arc when a route crosses the ±180° meridian.
+            val lonDelta = ((b.lon - a.lon + 540.0) % 360.0) - 180.0
+            val lon = ((a.lon + lonDelta * t + 540.0) % 360.0) - 180.0
             Sample(target, elevationAt(lat, lon)?.takeIf { it.isFinite() })
         }
     }
