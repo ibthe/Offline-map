@@ -1135,7 +1135,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderWaypointsForViewport() {
         val m = map ?: return
         if (mapView.width <= 0 || mapView.height <= 0 || style == null) return
-        val center = m.cameraPosition.target
+        val center = m.cameraPosition.target ?: return
         val corners: List<LatLng> = try {
             listOf(
                 android.graphics.PointF(0f, 0f),
