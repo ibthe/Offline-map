@@ -42,6 +42,18 @@ class TrackStatsTest {
     }
 
     @Test
+    fun ignoresImpossibleGpsJumpWhenCalculatingSpeed() {
+        val result = TrackStats.calculate(listOf(listOf(
+            TrackStats.Sample(41.0, 44.0, 10.0, 1_000L),
+            TrackStats.Sample(41.1, 44.1, 10.0, 2_000L)
+        )))
+        assertTrue(result.distanceM > 10_000.0)
+        assertEquals(0L, result.movingMs)
+        assertEquals(0.0, result.averageSpeedKmh, 0.0)
+        assertEquals(0.0, result.maxSpeedKmh, 0.0)
+    }
+
+    @Test
     fun doesNotCountLongTimestampGapsAsMovingTime() {
         val result = TrackStats.calculate(listOf(listOf(
             TrackStats.Sample(41.0, 44.0, 10.0, 1_000L),

@@ -54,10 +54,12 @@ object TrackStats {
                 }
                 val dt = b.timestampMs - a.timestampMs
                 if (a.timestampMs > 0L && b.timestampMs > a.timestampMs && dt <= 5 * 60 * 1000L) {
-                    moving += dt
-                    movingDistance += d
                     val speed = d / dt * 3_600_000.0
-                    if (speed.isFinite() && speed <= 250.0) maxSpeed = maxOf(maxSpeed, speed)
+                    if (speed.isFinite() && speed <= 250.0) {
+                        moving += dt
+                        movingDistance += d
+                        maxSpeed = maxOf(maxSpeed, speed)
+                    }
                 }
             }
         }
