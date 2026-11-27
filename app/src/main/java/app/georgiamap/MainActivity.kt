@@ -1068,11 +1068,11 @@ class MainActivity : AppCompatActivity() {
         var lonRadius = 180.0
         try {
             val corners = listOf(
-                android.graphics.Point(tap.x - radius.toInt(), tap.y - radius.toInt()),
-                android.graphics.Point(tap.x + radius.toInt(), tap.y - radius.toInt()),
-                android.graphics.Point(tap.x + radius.toInt(), tap.y + radius.toInt()),
-                android.graphics.Point(tap.x - radius.toInt(), tap.y + radius.toInt())
-            ).map { m.projection.fromScreenLocation(it) }
+                android.graphics.PointF(tap.x - radius, tap.y - radius),
+                android.graphics.PointF(tap.x + radius, tap.y - radius),
+                android.graphics.PointF(tap.x + radius, tap.y + radius),
+                android.graphics.PointF(tap.x - radius, tap.y + radius)
+            ).mapNotNull { m.projection.fromScreenLocation(it) }
             latRadius = corners.maxOf { kotlin.math.abs(it.latitude - ll.latitude) }
             lonRadius = corners.maxOf { kotlin.math.abs(normalizeLonDelta(it.longitude - ll.longitude)) }
         } catch (_: Exception) { }
@@ -1130,11 +1130,11 @@ class MainActivity : AppCompatActivity() {
         val center = m.cameraPosition.target
         val corners = try {
             listOf(
-                android.graphics.Point(0, 0),
-                android.graphics.Point(mapView.width, 0),
-                android.graphics.Point(mapView.width, mapView.height),
-                android.graphics.Point(0, mapView.height)
-            ).map { m.projection.fromScreenLocation(it) }
+                android.graphics.PointF(0f, 0f),
+                android.graphics.PointF(mapView.width.toFloat(), 0f),
+                android.graphics.PointF(mapView.width.toFloat(), mapView.height.toFloat()),
+                android.graphics.PointF(0f, mapView.height.toFloat())
+            ).mapNotNull { m.projection.fromScreenLocation(it) }
         } catch (_: Exception) {
             emptyList()
         }
