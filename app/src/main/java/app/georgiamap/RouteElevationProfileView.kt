@@ -21,6 +21,13 @@ class RouteElevationProfileView @JvmOverloads constructor(
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
+    private val steepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(205, 92, 42)
+        style = Paint.Style.STROKE
+        strokeWidth = resources.displayMetrics.density * 4f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x33808080
         style = Paint.Style.STROKE
@@ -32,12 +39,14 @@ class RouteElevationProfileView @JvmOverloads constructor(
     }
     private val path = Path()
     private var samples: List<RouteAnalysis.Sample> = emptyList()
+    private var steepSections: List<RouteAnalysis.SteepSection> = emptyList()
     private var minElevation = 0.0
     private var maxElevation = 1.0
     private var totalDistance = 1.0
 
     fun setProfile(result: RouteAnalysis.Result) {
         samples = result.samples
+        steepSections = result.steepSections
         minElevation = result.minElevationM ?: 0.0
         maxElevation = result.maxElevationM ?: (minElevation + 1.0)
         if (maxElevation - minElevation < 1.0) {
@@ -45,7 +54,7 @@ class RouteElevationProfileView @JvmOverloads constructor(
             maxElevation += 0.5
         }
         totalDistance = result.distanceM.coerceAtLeast(1.0)
-        contentDescription = "Профиль высот маршрута: от ${minElevation.toInt()} до ${maxElevation.toInt()} метров"
+        contentDescription = "Профиль высот маршрута: от ${minElevation.toInt()} до ${maxElevation.toInt()} метров, крутых участков: ${steepSections.size}"
         invalidate()
     }
 
@@ -88,5 +97,19 @@ class RouteElevationProfileView @JvmOverloads constructor(
             }
         }
         canvas.drawPath(path, linePaint)
+
+        // Highlight only sampled line segments that overlap a calculated steep section.
+        for (i in 1 until samples.size) {
+            val a = samples[i - 1]
+            val b = samples[i]
+            val h0 = a.elevationM ?: continue
+            val h1 = b.elevationM ?: continue
+            if (steepSections.none { it.fromM < b.distanceM && it.toM > a.distanceM }) continue
+            val x0 = left + (right - left) * (a.distanceM / totalDistance).toFloat()
+            val x1 = left + (right - left) * (b.distanceM / totalDistance).toFloat()
+            val y0 = bottom - (bottom - top) * ((h0 - minElevation) / (maxElevation - minElevation)).toFloat()
+            val y1 = bottom - (bottom - top) * ((h1 - minElevation) / (maxElevation - minElevation)).toFloat()
+            canvas.drawLine(x0, y0, x1, y1, steepPaint)
+        }
     }
 }
