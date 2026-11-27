@@ -13,6 +13,7 @@ object TrackStats {
         val descentM: Double,
         val elapsedMs: Long,
         val movingMs: Long,
+        val stoppedMs: Long,
         val averageSpeedKmh: Double,
         val maxSpeedKmh: Double,
         val pointCount: Int,
@@ -28,6 +29,7 @@ object TrackStats {
         var ascent = 0.0
         var descent = 0.0
         var moving = 0L
+        var stopped = 0L
         var movingDistance = 0.0
         var maxSpeed = 0.0
         var minTime = Long.MAX_VALUE
@@ -70,12 +72,14 @@ object TrackStats {
                     if (speed >= MIN_MOVING_SPEED_KMH) {
                         moving += dt
                         movingDistance += d
+                    } else {
+                        stopped += dt
                     }
                 }
             }
         }
         val elapsed = if (minTime != Long.MAX_VALUE && maxTime >= minTime) maxTime - minTime else 0L
         val average = if (moving > 0L) movingDistance / moving * 3_600.0 else 0.0
-        return Result(distance, ascent, descent, elapsed, moving, average, maxSpeed, pointCount, elevationSamples)
+        return Result(distance, ascent, descent, elapsed, moving, stopped, average, maxSpeed, pointCount, elevationSamples)
     }
 }
