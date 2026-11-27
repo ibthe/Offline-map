@@ -39,6 +39,19 @@ class MapPackageBuilderTests(unittest.TestCase):
             self.assertIn("tiles=tiles.mbtiles", manifest)
             self.assertIn("routing=routing.bin", manifest)
 
+    def test_includes_optional_relief_and_contours_assets(self):
+        relief = self.root / "relief.mbtiles"
+        contours = self.root / "contours.mbtiles"
+        relief.write_bytes(b"SQLite format 3\\x00" + bytes(32))
+        contours.write_bytes(b"SQLite format 3\\x00" + bytes(32))
+        output = create_package(self.args(relief=str(relief), contours=str(contours)))
+        with zipfile.ZipFile(output) as archive:
+            self.assertIn("relief.mbtiles", archive.namelist())
+            self.assertIn("contours.mbtiles", archive.namelist())
+            manifest = archive.read("package.properties").decode("utf-8")
+            self.assertIn("relief=relief.mbtiles", manifest)
+            self.assertIn("contours=contours.mbtiles", manifest)
+
     def test_rejects_invalid_bounds_and_ids(self):
         with self.assertRaises(ValueError):
             create_package(self.args(bounds=[41, 44, 40, 45]))
