@@ -1457,15 +1457,29 @@ class MainActivity : AppCompatActivity() {
                 if (selected.id == mapPackage.id) {
                     toast("Уже выбрана карта «${selected.title}»")
                 } else {
-                    prefs.edit().putString("map_package_id", selected.id).apply()
-                    recreate()
+                    selectMapPackage(selected)
                 }
             }
             .setNeutralButton("Импортировать .gmap") { _, _ ->
-                mapPackageImportLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                mapPackageImportLauncher.launch(arrayOf("*/*"))
             }
             .setNegativeButton("Закрыть", null)
             .show()
+    }
+
+    private fun selectMapPackage(selected: MapPackage) {
+        fun applySelection() {
+            if (navMode != NavMode.IDLE) stopNav()
+            prefs.edit().putString("map_package_id", selected.id).apply()
+            recreate()
+        }
+        if (navMode != NavMode.IDLE) {
+            MaterialAlertDialogBuilder(this)
+                .setMessage("Смена карты завершит текущий маршрут. Продолжить?")
+                .setPositiveButton("Сменить карту") { _, _ -> applySelection() }
+                .setNegativeButton("Остаться", null)
+                .show()
+        } else applySelection()
     }
 
     private fun importMapPackage(uri: Uri) {
@@ -1482,10 +1496,7 @@ class MainActivity : AppCompatActivity() {
                         MaterialAlertDialogBuilder(this)
                             .setTitle("Пакет установлен")
                             .setMessage("«${pack.title}» добавлен. Переключить карту сейчас?")
-                            .setPositiveButton("Переключить") { _, _ ->
-                                prefs.edit().putString("map_package_id", pack.id).apply()
-                                recreate()
-                            }
+                            .setPositiveButton("Переключить") { _, _ -> selectMapPackage(pack) }
                             .setNegativeButton("Позже", null)
                             .show()
                     }
