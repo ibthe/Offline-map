@@ -2605,7 +2605,7 @@ class MainActivity : AppCompatActivity() {
         val avoidanceWarnings = session?.route?.warnings.orEmpty()
         findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
             " · " + routePreferenceName(routePreference) +
-            (if (routeAvoidance != RouteAvoidance.NONE) " · без " + routeAvoidanceSummary() else "") +
+            (if (routeAvoidance != RouteAvoidance.NONE) " · избегает: " + routeAvoidanceSummary() else "") +
             (if (pendingFrom != null) "\nот «$pendingFromName»" else "") +
             (if (navDestName.isNotBlank()) "\n→ $navDestName" else "") +
             (if (note.isNotEmpty()) "\n$note" else "") +
