@@ -2068,7 +2068,9 @@ class MainActivity : AppCompatActivity() {
 
             sb.append("${mapPackage.placesAsset ?: "Поиск"}: ").append(try { placeDb?.count()?.toString() ?: "нет" } catch (_: Exception) { "ошибка" }).append(" мест\n")
             sb.append("relief: ").append(if (reliefPresent) "есть" else "нет").append("\n")
-            sb.append("${mapPackage.contoursAsset ?: "Линии высот"}: ").append(if (contoursFile?.exists() == true) "${contoursFile.length() shr 20} МБ" else "нет").append("\n")
+            val contoursSizeMb = contoursFile?.takeIf { it.exists() }?.length()?.shr(20)
+            sb.append("${mapPackage.contoursAsset ?: "Линии высот"}: ")
+                .append(contoursSizeMb?.let { "$it МБ" } ?: "нет").append("\n")
             sb.append("значки на карте: ").append(iconCount).append(" из ").append(PoiCats.IMAGES.size).append("\n")
             try {
                 val files = assets.list("glyphs/NotoSans")?.size ?: 0
@@ -2373,11 +2375,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Runs the search on a worker thread (the road graph is loaded from routing.bin on first use). */
+    /** Runs the search on a worker thread (the road graph is loaded from the selected package on first use). */
     private fun computeRoute(from: LatLng, to: LatLng, silent: Boolean, done: (RouteResult?, String?) -> Unit) {
         val requestId = ++routeRequestId
         val f = mapPackage.routingAsset?.let { File(filesDir, it) }
-        if (f?.exists() != true) {
+        if (f == null || !f.isFile) {
             if (requestId == routeRequestId) done(null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
             return
         }
