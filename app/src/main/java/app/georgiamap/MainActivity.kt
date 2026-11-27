@@ -1803,6 +1803,7 @@ class MainActivity : AppCompatActivity() {
         }
         val note = EditText(this).apply {
             hint = "Заметка (необязательно)"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(2_000))
             minLines = 2
             maxLines = 4
             setSingleLine(false)
@@ -1832,6 +1833,7 @@ class MainActivity : AppCompatActivity() {
         val note = EditText(this).apply {
             setText(waypoint.note)
             hint = "Заметка"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(2_000))
             minLines = 3
             maxLines = 6
             setSingleLine(false)
