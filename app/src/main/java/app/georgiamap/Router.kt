@@ -28,7 +28,8 @@ object RouteAvoidance {
     const val UNPAVED = 1
     const val STEPS = 2
     const val DIFFICULT_TRAILS = 4
-    const val ALL = 7
+    const val TOLLS = 8
+    const val ALL = 15
 }
 
 object Maneuver {
@@ -213,6 +214,7 @@ class RoadGraph(buf: ByteBuffer) {
     private fun isUnpaved(e: Int) = (eFlags[e] shr 19) and 1 == 1
     private fun trackGrade(e: Int) = (eFlags[e] shr 20) and 7
     private fun smoothness(e: Int) = (eFlags[e] shr 23) and 7
+    private fun isToll(e: Int) = (eFlags[e] shr 26) and 1 == 1
     private fun isDifficult(e: Int) = trackGrade(e) >= 4 || smoothness(e) >= 4
 
     private fun avoidancePenalty(e: Int, avoidance: Int): Double {
@@ -220,6 +222,7 @@ class RoadGraph(buf: ByteBuffer) {
         if ((avoidance and RouteAvoidance.UNPAVED) != 0 && isUnpaved(e)) factor *= 2.8
         if ((avoidance and RouteAvoidance.STEPS) != 0 && cls(e) == 9) factor *= 4.0
         if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && isDifficult(e)) factor *= 3.0
+        if ((avoidance and RouteAvoidance.TOLLS) != 0 && isToll(e)) factor *= 3.0
         return factor
     }
 
@@ -590,6 +593,8 @@ class RoadGraph(buf: ByteBuffer) {
             warnings.add("В маршруте остались лестницы")
         if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && legs.any { isDifficult(it.e) })
             warnings.add("В маршруте остались тропы с низким качеством покрытия")
+        if ((avoidance and RouteAvoidance.TOLLS) != 0 && legs.any { isToll(it.e) })
+            warnings.add("В маршруте остались платные дороги")
         return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist),
             s.dist, t.dist, preferenceCost, warnings)
     }
