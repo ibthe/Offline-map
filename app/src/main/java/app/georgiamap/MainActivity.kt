@@ -2252,12 +2252,15 @@ class MainActivity : AppCompatActivity() {
                 val output = contentResolver.openOutputStream(uri) ?: error("Не удалось открыть файл для записи")
                 output.bufferedWriter(Charsets.UTF_8).use { out ->
                     out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-                    out.append("<gpx version=\"1.1\" creator=\"Georgia Offline Map\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
+                    out.append("<gpx version=\"1.1\" creator=\"Georgia Offline Map\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:gm=\"https://georgiamap.app/gpx/extensions/1\">\n")
                     for (w in userDb.waypoints()) {
                         out.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name>")
                         if (w.note.isNotBlank()) out.append("<desc>${esc(w.note)}</desc>")
                         if (w.category.isNotBlank()) out.append("<type>${esc(w.category)}</type>")
                         if (w.ts > 0L) out.append("<time>${iso.format(Date(w.ts))}</time>")
+                        if (w.folder.isNotBlank() && w.folder != "Без папки") {
+                            out.append("<extensions><gm:folder>${esc(w.folder)}</gm:folder></extensions>")
+                        }
                         out.append("</wpt>\n")
                     }
                     for (t in userDb.tracks()) {
@@ -2306,7 +2309,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } ?: error("Не удалось открыть GPX-файл")
                 val waypoints = parsed.waypoints.map {
-                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs, false, it.note, it.category)
+                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs, false, it.note, it.category, it.folder)
                 }
                 val tracks = parsed.tracks.map { track ->
                     UserDb.ImportTrack(track.name, track.points.map { point ->
