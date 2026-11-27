@@ -1830,7 +1830,7 @@ class MainActivity : AppCompatActivity() {
                             when (a) {
                                 0 -> flyTo(w.lat, w.lon, 15.0)
                                 1 -> setDestination(LatLng(w.lat, w.lon), w.name)
-                                2 -> { userDb.setWaypointFavorite(w.id, !w.favorite); refreshWaypoints(); showWaypoints() }
+                                2 -> { userDb.setWaypointFavorite(w.id, !w.favorite); refreshWaypoints(); toast(if (w.favorite) "Убрано из избранного" else "Добавлено в избранное") }
                                 3 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
                             }
                         }.show()
