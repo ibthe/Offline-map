@@ -84,7 +84,8 @@ class TrackService : Service() {
         val sticky = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = sticky?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = sticky?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
-        batteryLow = level >= 0 && scale > 0 && level * 100 / scale <= 15
+        val plugged = sticky?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        batteryLow = level >= 0 && scale > 0 && plugged == 0 && level * 100 / scale <= 15
         val filter = android.content.IntentFilter().apply {
             addAction(Intent.ACTION_BATTERY_LOW)
             addAction(Intent.ACTION_BATTERY_OKAY)
