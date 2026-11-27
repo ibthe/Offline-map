@@ -27,6 +27,9 @@ CAR_KMH = {"motorway": 90, "motorway_link": 50, "trunk": 80, "trunk_link": 50, "
            "residential": 30, "road": 30, "service": 20, "track": 15, "living_street": 15}
 UNPAVED = {"unpaved", "gravel", "dirt", "ground", "earth", "mud", "sand", "grass", "fine_gravel", "compacted",
            "pebblestone", "dirt/sand"}
+TRACK_GRADE = {"grade1": 1, "grade2": 2, "grade3": 3, "grade4": 4, "grade5": 5}
+SMOOTHNESS = {"excellent": 1, "good": 2, "intermediate": 3, "bad": 4,
+              "very_bad": 5, "horrible": 6, "very_horrible": 7, "impassable": 7}
 DENY = {"no", "private", "customers", "delivery", "destination", "agricultural", "forestry", "discouraged"}
 YES = {"yes", "designated", "permissive", "official"}
 
@@ -103,9 +106,12 @@ def way_props(t):
     if unpaved:
         sp = min(sp, 20 if hw == "track" else 30)
     sp = int(max(5, min(130, round(sp))))
+    track_grade = TRACK_GRADE.get(str(t.get("tracktype", "")).lower(), 0)
+    smoothness = SMOOTHNESS.get(str(t.get("smoothness", "")).lower(), 0)
     flags = (int(car_f) | int(foot_f) << 1 | int(bike_f) << 2 |
              int(car_b) << 3 | int(foot_b) << 4 | int(bike_b) << 5 |
-             sp << 6 | CLS[hw] << 14 | int(rb) << 18 | int(unpaved) << 19)
+             sp << 6 | CLS[hw] << 14 | int(rb) << 18 | int(unpaved) << 19 |
+             track_grade << 20 | smoothness << 23)
     if not (car or foot or bike):
         return None
     name = t.get("name:ru") or t.get("name") or t.get("name:en") or t.get("ref") or ""
