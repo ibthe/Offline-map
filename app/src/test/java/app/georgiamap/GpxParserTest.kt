@@ -73,6 +73,27 @@ class GpxParserTest {
     }
 
     @Test
+    fun preservesWaypointFolderFromNamespacedExtension() {
+        val parsed = parse("""<gpx version="1.1" xmlns:gm="https://georgiamap.app/gpx/extensions/1">
+            <wpt lat="41.7" lon="44.8">
+                <name>Camp</name>
+                <extensions><gm:folder>Base camp &amp; north</gm:folder></extensions>
+            </wpt>
+        </gpx>""")
+        assertEquals("Base camp & north", parsed.waypoints.single().folder)
+    }
+
+    @Test
+    fun ignoresFolderElementsFromUnknownNamespaces() {
+        val parsed = parse("""<gpx version="1.1" xmlns:other="https://example.invalid">
+            <wpt lat="41.7" lon="44.8">
+                <extensions><other:folder>Not ours</other:folder></extensions>
+            </wpt>
+        </gpx>""")
+        assertEquals("Без папки", parsed.waypoints.single().folder)
+    }
+
+    @Test
     fun missingWaypointTimeRemainsMissing() {
         val parsed = parse("<gpx><wpt lat='41.7' lon='44.8'><name>Point</name></wpt></gpx>")
         assertEquals(0L, parsed.waypoints.single().timestampMs)
