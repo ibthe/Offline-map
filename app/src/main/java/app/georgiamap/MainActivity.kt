@@ -1558,8 +1558,10 @@ class MainActivity : AppCompatActivity() {
             val scale = it.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
             if (level >= 0 && scale > 0) (level * 100 / scale) else -1
         } ?: -1
+        val isCharging = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } == true
         val batteryStatus = when {
             batteryLevel < 0 -> "Заряд батареи: неизвестен"
+            isCharging -> "Заряд батареи: $batteryLevel% · подключено питание"
             batteryLevel <= 10 -> "⚠ Критически низкий заряд: $batteryLevel%"
             batteryLevel <= 20 -> "⚠ Низкий заряд батареи: $batteryLevel%"
             else -> "Заряд батареи: $batteryLevel%"
