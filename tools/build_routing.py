@@ -108,10 +108,11 @@ def way_props(t):
     sp = int(max(5, min(130, round(sp))))
     track_grade = TRACK_GRADE.get(str(t.get("tracktype", "")).lower(), 0)
     smoothness = SMOOTHNESS.get(str(t.get("smoothness", "")).lower(), 0)
+    toll = str(t.get("toll", "")).lower() in ("yes", "true", "1")
     flags = (int(car_f) | int(foot_f) << 1 | int(bike_f) << 2 |
              int(car_b) << 3 | int(foot_b) << 4 | int(bike_b) << 5 |
              sp << 6 | CLS[hw] << 14 | int(rb) << 18 | int(unpaved) << 19 |
-             track_grade << 20 | smoothness << 23)
+             track_grade << 20 | smoothness << 23 | int(toll) << 26)
     if not (car or foot or bike):
         return None
     name = t.get("name:ru") or t.get("name") or t.get("name:en") or t.get("ref") or ""
