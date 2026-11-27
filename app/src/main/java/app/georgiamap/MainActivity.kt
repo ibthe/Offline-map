@@ -314,7 +314,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupChips()
-        navProfile = prefs.getInt("nav_profile", Profile.CAR)
+        navProfile = prefs.getInt("nav_profile", Profile.CAR).coerceIn(Profile.CAR, Profile.HIKE)
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
         refreshRecButton()
         findViewById<View>(R.id.btnRouteTo).setOnClickListener {
@@ -1389,7 +1389,7 @@ class MainActivity : AppCompatActivity() {
                 MenuSection("Навигация", listOf(
                     MenuRow.Toggle("Голосовые подсказки", "Нужен русский голос в системе",
                         prefs.getBoolean("nav_voice", true)) { on -> prefs.edit().putBoolean("nav_voice", on).apply() },
-                    MenuRow.Link("Транспорт по умолчанию", profileName(navProfile)) { showNavProfileDialog() }
+                    MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() }
                 )),
                 MenuSection("Мои данные", listOf(
                     MenuRow.Toggle("Кнопка записи трека",
