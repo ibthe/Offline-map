@@ -54,7 +54,7 @@ object TrackStats {
                 }
                 val dt = b.timestampMs - a.timestampMs
                 if (a.timestampMs > 0L && b.timestampMs > a.timestampMs && dt <= 5 * 60 * 1000L) {
-                    val speed = d / dt * 3_600_000.0
+                    val speed = d / dt * 3_600.0
                     if (speed.isFinite() && speed <= 250.0) {
                         moving += dt
                         movingDistance += d
@@ -64,7 +64,7 @@ object TrackStats {
             }
         }
         val elapsed = if (minTime != Long.MAX_VALUE && maxTime >= minTime) maxTime - minTime else 0L
-        val average = if (moving > 0L) movingDistance / moving * 3_600_000.0 else 0.0
+        val average = if (moving > 0L) movingDistance / moving * 3_600.0 else 0.0
         return Result(distance, ascent, descent, elapsed, moving, average, maxSpeed, pointCount, elevationSamples)
     }
 }

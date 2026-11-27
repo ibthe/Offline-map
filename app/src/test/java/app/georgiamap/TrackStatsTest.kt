@@ -26,7 +26,8 @@ class TrackStatsTest {
         assertEquals(180_000L, result.movingMs)
         assertEquals(5, result.pointCount)
         assertTrue(result.averageSpeedKmh > 0.0)
-        assertTrue(result.maxSpeedKmh >= result.averageSpeedKmh)
+        assertTrue(result.maxSpeedKmh + 1e-6 >= result.averageSpeedKmh)
+        assertTrue(result.averageSpeedKmh in 6.5..6.8)
     }
 
     @Test
