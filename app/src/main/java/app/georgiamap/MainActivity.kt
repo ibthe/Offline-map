@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etSearch: EditText
     private lateinit var lvResults: ListView
     private lateinit var prefs: SharedPreferences
+    private lateinit var mapPackage: MapPackage
     private lateinit var userDb: UserDb
 
     private var map: MapLibreMap? = null
@@ -253,6 +254,7 @@ class MainActivity : AppCompatActivity() {
         setupEdgeToEdge()
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        mapPackage = MapPackages.resolve(prefs.getString("map_package_id", MapPackages.DEFAULT_ID) ?: MapPackages.DEFAULT_ID)
         locationRequestedByUser = prefs.getBoolean("location_user_enabled", false)
         following = prefs.getBoolean("location_follow", locationRequestedByUser)
         locActive = locationRequestedByUser
@@ -303,7 +305,7 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.root).post {
                 try {
                     val p = mapViewportPadding()
-                    map?.easeCamera(CameraUpdateFactory.newLatLngBounds(GEORGIA, p[0], p[1], p[2], p[3]), 700)
+                    map?.easeCamera(CameraUpdateFactory.newLatLngBounds(mapPackage.bounds.toLatLngBounds(), p[0], p[1], p[2], p[3]), 700)
                 } catch (_: Exception) { }
             }
         }
@@ -408,11 +410,11 @@ class MainActivity : AppCompatActivity() {
         }
         prepareData {
             val dir = filesDir
-            tilesFile = File(dir, "georgia.mbtiles")
-            File(dir, "places.db").takeIf { it.exists() }?.let {
+            tilesFile = File(dir, mapPackage.tilesAsset)
+            mapPackage.placesAsset?.let { File(dir, it) }?.takeIf { it.exists() }?.let {
                 placeDb = try { PlaceDb(it.absolutePath) } catch (e: Exception) { errors.add("places: $e"); null }
             }
-            File(dir, "relief.mbtiles").takeIf { it.exists() }?.let {
+            mapPackage.reliefAsset?.let { File(dir, it) }?.takeIf { it.exists() }?.let {
                 elevation = try { Elevation(it.absolutePath) } catch (e: Exception) { errors.add("relief: $e"); null }
             }
             if (restoredSearch.isNotEmpty()) etSearch.setText(restoredSearch)
@@ -555,9 +557,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun prepareData(onReady: () -> Unit) {
         val have = assets.list("")?.toSet() ?: emptySet()
-        if ("georgia.mbtiles" !in have) {
+        if (mapPackage.tilesAsset !in have) {
             loading.visibility = View.VISIBLE
-            loadingText.text = "В APK нет georgia.mbtiles — сборка карты не выполнилась"
+            loadingText.text = "В APK нет ${mapPackage.tilesAsset} — сборка пакета карты не выполнилась"
             return
         }
 
@@ -574,13 +576,13 @@ class MainActivity : AppCompatActivity() {
         fun assetVersion(name: String) = versions[name] ?: BuildConfig.MAP_DATA_VERSION
         fun assetLength(name: String) = assets.openFd(name).use { it.length }
 
-        val removed = DATA_FILES.filter { it !in have }
+        val removed = mapPackage.assetFiles.filter { it !in have }
         for (name in removed) {
             File(filesDir, name).delete()
             prefs.edit().remove("asset_version_$name").apply()
         }
 
-        val todo = DATA_FILES.filter { name ->
+        val todo = mapPackage.assetFiles.filter { name ->
             if (name !in have) false
             else {
                 val target = File(filesDir, name)
@@ -601,7 +603,7 @@ class MainActivity : AppCompatActivity() {
                         File(filesDir, "$name.tmp").delete()
                         File(filesDir, name).delete()
                         prefs.edit().remove("asset_version_$name").apply()
-                        if (name == "georgia.mbtiles") throw e
+                        if (name == mapPackage.tilesAsset) throw e
                         errors.add("$name: $e")
                     }
                 }
@@ -705,16 +707,16 @@ class MainActivity : AppCompatActivity() {
         val m = map ?: return
         val tiles = tilesFile ?: return
         val name = "style_${palette().key}" + (if (isNight()) "_dark" else "") + ".json"
-        val relief = File(filesDir, "relief.mbtiles")
-        val contours = File(filesDir, "contours.mbtiles")
+        val relief = mapPackage.reliefAsset?.let { File(filesDir, it) }
+        val contours = mapPackage.contoursAsset?.let { File(filesDir, it) }
         val obj = JSONObject(assets.open(name).bufferedReader().use { it.readText() })
         // optional data: without the file its source and layers are dropped, so the style still loads
-        if (!relief.exists()) dropFromStyle(obj, listOf("relief")) { it == "relief-hillshade" }
-        if (!contours.exists()) dropFromStyle(obj, listOf("contours", "contours-labels")) { it.startsWith("contour-") }
+        if (relief?.exists() != true) dropFromStyle(obj, listOf("relief")) { it == "relief-hillshade" }
+        if (contours?.exists() != true) dropFromStyle(obj, listOf("contours", "contours-labels")) { it.startsWith("contour-") }
         val json = obj.toString()
             .replace("__MBTILES_URL__", "mbtiles://" + tiles.absolutePath)
-            .replace("__RELIEF_URL__", "mbtiles://" + relief.absolutePath)
-            .replace("__CONTOURS_URL__", "mbtiles://" + contours.absolutePath)
+            .replace("__RELIEF_URL__", relief?.let { "mbtiles://" + it.absolutePath } ?: "")
+            .replace("__CONTOURS_URL__", contours?.let { "mbtiles://" + it.absolutePath } ?: "")
         val builder = Style.Builder().fromJson(json)
         for ((id, bmp) in markImages()) builder.withImage(id, bmp)
         m.setStyle(builder) { s ->
@@ -1350,8 +1352,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMenu() {
         val langs = enabledLanguages().joinToString(" · ") { it.name }.ifEmpty { "выкл" }
-        val hasRelief = File(filesDir, "relief.mbtiles").exists()
-        val hasContours = File(filesDir, "contours.mbtiles").exists()
+        val hasRelief = mapPackage.reliefAsset?.let { File(filesDir, it).exists() } == true
+        val hasContours = mapPackage.contoursAsset?.let { File(filesDir, it).exists() } == true
         val recordBusy = TrackService.running || prefs.getLong("rec_track", 0L) > 0L
         val modeName = when (themeMode()) { "light" -> "светлый"; "dark" -> "тёмный"; "twilight" -> "сумерки"; else -> "авто" }
         MenuUi.show(
@@ -2032,7 +2034,7 @@ class MainActivity : AppCompatActivity() {
 
         val tileFile = tilesFile
         val reliefPresent = elevation != null
-        val contoursFile = File(filesDir, "contours.mbtiles")
+        val contoursFile = mapPackage.contoursAsset?.let { File(filesDir, it) }
         val iconCount = markImages().size
         val rendered = ArrayList<Pair<String, Int>>()
         val m = map
@@ -2048,7 +2050,7 @@ class MainActivity : AppCompatActivity() {
         thread(name = "map-diagnostics") {
             val sb = StringBuilder()
             if (tileFile != null && tileFile.exists()) {
-                sb.append("georgia.mbtiles: ${tileFile.length() shr 20} МБ\n")
+                sb.append("${mapPackage.tilesAsset}: ${tileFile.length() shr 20} МБ\n")
                 var db: SQLiteDatabase? = null
                 try {
                     db = SQLiteDatabase.openDatabase(tileFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
@@ -2062,11 +2064,11 @@ class MainActivity : AppCompatActivity() {
                     sb.append("  тайлы: $zs\n")
                 } catch (e: Exception) { sb.append("  ошибка чтения: $e\n") }
                 finally { db?.close() }
-            } else sb.append("georgia.mbtiles: нет\n")
+            } else sb.append("${mapPackage.tilesAsset}: нет\n")
 
-            sb.append("places.db: ").append(try { placeDb?.count()?.toString() ?: "нет" } catch (_: Exception) { "ошибка" }).append(" мест\n")
+            sb.append("${mapPackage.placesAsset ?: "Поиск"}: ").append(try { placeDb?.count()?.toString() ?: "нет" } catch (_: Exception) { "ошибка" }).append(" мест\n")
             sb.append("relief: ").append(if (reliefPresent) "есть" else "нет").append("\n")
-            sb.append("contours.mbtiles (линии высот): ").append(if (contoursFile.exists()) "${contoursFile.length() shr 20} МБ" else "нет").append("\n")
+            sb.append("${mapPackage.contoursAsset ?: "Линии высот"}: ").append(if (contoursFile?.exists() == true) "${contoursFile.length() shr 20} МБ" else "нет").append("\n")
             sb.append("значки на карте: ").append(iconCount).append(" из ").append(PoiCats.IMAGES.size).append("\n")
             try {
                 val files = assets.list("glyphs/NotoSans")?.size ?: 0
@@ -2374,9 +2376,9 @@ class MainActivity : AppCompatActivity() {
     /** Runs the search on a worker thread (the road graph is loaded from routing.bin on first use). */
     private fun computeRoute(from: LatLng, to: LatLng, silent: Boolean, done: (RouteResult?, String?) -> Unit) {
         val requestId = ++routeRequestId
-        val f = File(filesDir, "routing.bin")
-        if (!f.exists()) {
-            if (requestId == routeRequestId) done(null, "В приложении нет дорожных данных (routing.bin). Пересоберите APK.")
+        val f = mapPackage.routingAsset?.let { File(filesDir, it) }
+        if (f?.exists() != true) {
+            if (requestId == routeRequestId) done(null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
             return
         }
         val profile = navProfile
@@ -2583,8 +2585,6 @@ class MainActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private val DATA_FILES = listOf("georgia.mbtiles", "relief.mbtiles", "contours.mbtiles", "places.db", "routing.bin")
-        private val GEORGIA = LatLngBounds.from(43.65, 46.8, 41.0, 40.0)
 
         private val KIND_RU: Map<String, String> = mapOf(
             "city" to "город", "town" to "город/посёлок", "village" to "село", "hamlet" to "хутор",
