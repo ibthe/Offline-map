@@ -2529,6 +2529,9 @@ class MainActivity : AppCompatActivity() {
             routeAnalysisBusy -> " · анализ высот…"
             routeAnalysisResult?.difficulty == RouteAnalysis.Difficulty.HARD -> " · ⚠ сложный рельеф · профиль ↗"
             routeAnalysisResult?.difficulty == RouteAnalysis.Difficulty.MODERATE -> " · умеренный рельеф · профиль ↗"
+            routeAnalysisResult?.coveragePct?.let { it < 80 } == true -> " · ⚠ неполные высотные данные · профиль ↗"
+            routeAnalysisResult?.steepSections?.isNotEmpty() == true ->
+                " · крутые участки: " + routeAnalysisResult!!.steepSections.size + " · профиль ↗"
             routeAnalysisResult?.hasElevation == true -> " · профиль высот ↗"
             routeAnalysisResult != null -> " · рельеф частично недоступен ↗"
             elevation == null -> " · нет данных рельефа ↗"
@@ -2809,7 +2812,7 @@ class MainActivity : AppCompatActivity() {
             })
         }
         content.addView(android.widget.TextView(this).apply {
-            text = "\nОценка учитывает только высотный профиль и не определяет состояние троп, осыпи, лавинную опасность или фактическую проходимость. Используйте её как ориентир, а не гарантию безопасности."
+            text = "\nОценка сложности — ориентировочная эвристика только по высотному профилю. Она не определяет состояние троп, осыпи, лавинную опасность, погоду или фактическую проходимость. При покрытии высотными данными ниже 80% оценка сложности не выдаётся. Используйте результат как ориентир, а не гарантию безопасности."
             textSize = 12f
             setTextColor(themeColorInt(R.attr.gmTextSecondary))
         })
