@@ -11,11 +11,12 @@ from places_fts import create_fts_index
 class PlacesFtsTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
-        self.db.execute("create table places(id integer primary key, s text, prio integer, ka text)")
-        self.db.executemany("insert into places(id,s,prio,ka) values (?,?,?,?)", [
-            (1, "tbilisi თბილისი tbilisi city", 0, "Tbilisi"),
-            (2, "kazbek mountain peak", 4, "Kazbek"),
-            (3, "station train railway", 5, "Station")
+        self.db.execute("create table places(id integer primary key, s text, prio integer, ka text, kind text)")
+        self.db.execute("create index places_kind_idx on places(kind)")
+        self.db.executemany("insert into places(id,s,prio,ka,kind) values (?,?,?,?,?)", [
+            (1, "tbilisi თბილისი tbilisi city", 0, "Tbilisi", "city"),
+            (2, "kazbek mountain peak", 4, "Kazbek", "peak"),
+            (3, "station train railway", 5, "Station", "hospital")
         ])
         create_fts_index(self.db)
 
@@ -35,6 +36,15 @@ class PlacesFtsTests(unittest.TestCase):
             ("tbi* AND city*",)
         ).fetchall()
         self.assertEqual([(1,)], rows)
+
+    def test_kind_index_supports_nearby_emergency_place_filter(self):
+        rows = self.db.execute(
+            "select id from places where kind in (?,?) order by id",
+            ("hospital", "police")
+        ).fetchall()
+        self.assertEqual([(3,)], rows)
+        indexes = {row[1] for row in self.db.execute("pragma index_list(places)")}
+        self.assertIn("places_kind_idx", indexes)
 
     def test_index_contains_every_place(self):
         self.assertEqual(3, self.db.execute("select count(*) from places_fts").fetchone()[0])
