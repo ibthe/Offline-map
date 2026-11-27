@@ -38,3 +38,5 @@ with `build_relief.py`, then builds `contours.mbtiles` with `build_contours.py -
 so contour tiles are limited to the actual vector-map coverage. Both assets are included
 in the resulting `.gmap`. Terrain coverage depends on the upstream Terrarium DEM; the
 profile must report missing samples rather than treating them as sea level or zero height.
+
+Regional package manifests accept `emergencyNumber`. The regional workflow requires the builder to supply a verified local number; the app does not assume that Georgia's 112 applies to every installed country.
