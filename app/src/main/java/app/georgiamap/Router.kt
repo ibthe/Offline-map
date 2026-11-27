@@ -28,7 +28,7 @@ object RouteAvoidance {
     const val UNPAVED = 1
     const val STEPS = 2
     const val DIFFICULT_TRAILS = 4
-    const val ALL = UNPAVED or STEPS or DIFFICULT_TRAILS
+    const val ALL = 7
 }
 
 object Maneuver {
@@ -215,9 +215,9 @@ class RoadGraph(buf: ByteBuffer) {
 
     private fun avoidancePenalty(e: Int, avoidance: Int): Double {
         var factor = 1.0
-        if (avoidance and RouteAvoidance.UNPAVED != 0 && isUnpaved(e)) factor *= 2.8
-        if (avoidance and RouteAvoidance.STEPS != 0 && cls(e) == 9) factor *= 4.0
-        if (avoidance and RouteAvoidance.DIFFICULT_TRAILS != 0 && isDifficult(e)) factor *= 3.0
+        if ((avoidance and RouteAvoidance.UNPAVED) != 0 && isUnpaved(e)) factor *= 2.8
+        if ((avoidance and RouteAvoidance.STEPS) != 0 && cls(e) == 9) factor *= 4.0
+        if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && isDifficult(e)) factor *= 3.0
         return factor
     }
 
@@ -390,7 +390,7 @@ class RoadGraph(buf: ByteBuffer) {
         p: Int, preference: Int = RoutePreference.FASTEST, avoidance: Int = RouteAvoidance.NONE
     ): RouteResult? {
         if (p !in Profile.CAR..Profile.HIKE || preference !in RoutePreference.FASTEST..RoutePreference.SHORTEST ||
-            avoidance < 0 || avoidance and RouteAvoidance.ALL.inv() != 0) return null
+            avoidance < 0 || (avoidance and RouteAvoidance.ALL.inv()) != 0) return null
         if (!fromLat.isFinite() || !fromLon.isFinite() || !toLat.isFinite() || !toLon.isFinite()) return null
         if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 ||
             fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) return null
