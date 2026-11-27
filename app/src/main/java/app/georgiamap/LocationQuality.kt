@@ -36,12 +36,9 @@ object LocationQuality {
             candidateAccuracyM.isNaN() || candidateAccuracyM < 0f) return false
         if (currentTimeMs <= 0L) return true
 
-        // An expired fix must never block recovery merely because a provider reports
-        // a slightly older cached timestamp. Fresh fixes still get ordering/accuracy protection.
         val currentIsFresh = isFresh(currentTimeMs, nowMs, CURRENT_FIX_PROTECTION_MS)
-        if (!currentIsFresh) return true
         if (candidateTimeMs < currentTimeMs - 5_000L) return false
-        if (currentAccuracyM.isFinite() && currentAccuracyM > 0f &&
+        if (currentIsFresh && currentAccuracyM.isFinite() && currentAccuracyM > 0f &&
             candidateAccuracyM > currentAccuracyM * 1.8f &&
             candidateAccuracyM - currentAccuracyM > 20f) return false
 

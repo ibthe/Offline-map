@@ -198,12 +198,14 @@ class PlaceDb(path: String) {
             }
         }
 
-        // Preserve the original substring behavior for partial words and matches inside a name.
-        if (out.isEmpty()) {
+        // Preserve substring matches (for example, "bil" inside "Tbilisi") even when
+        // the prefix index already returned other results. Append only the remaining slots.
+        if (out.size < maxResults) {
+            val remaining = maxResults - out.size
             db.rawQuery(
                 "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where s like ? " +
                     "order by case when s like ? or s like ? then 0 else 1 end, prio, length(s) limit ?",
-                arrayOf("%" + q + "%", q + "%", "%\n" + q + "%", maxResults.toString())
+                arrayOf("%" + q + "%", q + "%", "%\n" + q + "%", remaining.toString())
             ).use { c -> while (c.moveToNext() && out.size < maxResults) append(c) }
         }
         return out
