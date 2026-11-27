@@ -61,6 +61,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -124,6 +125,7 @@ class MainActivity : AppCompatActivity() {
     private var safetyLookupGeneration = 0
 
     private var rulerOn = false
+    private var rulerAreaMode = false
     private val rulerPts = ArrayList<LatLng>()
     private var shownTrackId = -1L
 
@@ -283,7 +285,9 @@ class MainActivity : AppCompatActivity() {
         following = prefs.getBoolean("location_follow", locationRequestedByUser)
         locActive = locationRequestedByUser
         rulerOn = prefs.getBoolean("ruler_on", false)
+        rulerAreaMode = prefs.getBoolean("ruler_area_mode", false)
         shownTrackId = prefs.getLong("shown_track", -1L)
+        rulerAreaMode = savedInstanceState?.getBoolean("ruler_area_mode") ?: rulerAreaMode
         savedInstanceState?.getDoubleArray("ruler_points")?.let { points ->
             if (points.size % 2 == 0) for (i in points.indices step 2) rulerPts.add(LatLng(points[i], points[i + 1]))
         }
@@ -496,6 +500,7 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("search_query", etSearch.text?.toString() ?: "")
         outState.putDoubleArray("ruler_points", rulerPts.flatMap { listOf(it.latitude, it.longitude) }.toDoubleArray())
+        outState.putBoolean("ruler_area_mode", rulerAreaMode)
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
     }
@@ -1031,6 +1036,9 @@ class MainActivity : AppCompatActivity() {
             PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(themeHex(R.attr.gmCrosshair)),
             PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
 
+        s.addSource(GeoJsonSource("ovl-ruler-area"))
+        s.addLayer(FillLayer("ovl-ruler-area-fill", "ovl-ruler-area").withProperties(
+            PropertyFactory.fillColor("#e65100"), PropertyFactory.fillOpacity(0.18f)))
         s.addSource(GeoJsonSource("ovl-ruler"))
         s.addLayer(LineLayer("ovl-ruler-l", "ovl-ruler").withProperties(
             PropertyFactory.lineColor("#e65100"), PropertyFactory.lineWidth(3f),
@@ -1195,6 +1203,7 @@ class MainActivity : AppCompatActivity() {
         val visible = rulerOn && navMode == NavMode.IDLE
         val points = if (visible) rulerPts else emptyList()
         src("ovl-ruler")?.setGeoJson(Geo.lineFc(points))
+        src("ovl-ruler-area")?.setGeoJson(if (visible && rulerAreaMode) Geo.polygonFc(points) else Geo.polygonFc(emptyList()))
         src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(points))
         updateInfo()
     }
@@ -1267,8 +1276,15 @@ class MainActivity : AppCompatActivity() {
             sb.append("\nGPS: ±").append(it.accuracy.roundToInt()).append(" м")
             if (it.hasAltitude()) sb.append(", высота ").append(it.altitude.roundToInt()).append(" м")
         } ?: run { if (locActive) sb.append("\nGPS: ожидание сигнала…") }
-        if (rulerOn && navMode == NavMode.IDLE) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
-            .append(" (тап — новая точка)")
+        if (rulerOn && navMode == NavMode.IDLE) {
+            if (rulerAreaMode) {
+                sb.append("\nПлощадь: ").append(if (rulerPts.size >= 3) Geo.fmtArea(Geo.areaSquareMeters(rulerPts)) else "добавьте ещё ${3 - rulerPts.size} точ.")
+                if (rulerPts.size >= 2) sb.append(" · периметр: ").append(Geo.fmtDist(Geo.length(rulerPts + rulerPts.first())))
+            } else {
+                sb.append("\nРасстояние: ").append(Geo.fmtDist(Geo.length(rulerPts)))
+            }
+            sb.append(" (тап — добавить точку)")
+        }
         if (TrackService.running) sb.append("\n● REC трек пишется")
         tvInfo.text = sb.toString()
     }
@@ -1480,6 +1496,32 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ menu
 
+    private fun chooseMeasurementMode() {
+        val current = if (!rulerOn) "выключено" else if (rulerAreaMode) "площадь" else "расстояние"
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Измерение · сейчас: $current")
+            .setItems(arrayOf("Измерять расстояние", "Измерять площадь", "Выключить и очистить")) { _, which ->
+                when (which) {
+                    0, 1 -> {
+                        val area = which == 1
+                        if (!rulerOn || rulerAreaMode != area) rulerPts.clear()
+                        rulerOn = true
+                        rulerAreaMode = area
+                        prefs.edit().putBoolean("ruler_on", true).putBoolean("ruler_area_mode", area).apply()
+                        toast(if (area) "Режим площади: отмечайте вершины контура" else "Режим расстояния: отмечайте точки линии")
+                    }
+                    2 -> {
+                        rulerOn = false
+                        rulerPts.clear()
+                        prefs.edit().putBoolean("ruler_on", false).apply()
+                    }
+                }
+                refreshRuler()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun showMenu() {
         val langs = enabledLanguages().joinToString(" · ") { it.name }.ifEmpty { "выкл" }
         val hasRelief = mapPackage.reliefAsset?.let { mapPackage.file(filesDir, it).exists() } == true
@@ -1493,12 +1535,7 @@ class MainActivity : AppCompatActivity() {
                 MenuTile(R.drawable.ic_compass, "Компас", false) { compass.show(CompassController.Mode.NORTH) },
                 MenuTile(R.drawable.ic_qibla, "Кибла", false) { compass.show(CompassController.Mode.QIBLA) },
                 MenuTile(R.drawable.ic_bookmark, "Мои точки", false) { showWaypoints() },
-                MenuTile(R.drawable.ic_straighten, "Линейка", rulerOn) {
-                    rulerOn = !rulerOn
-                    prefs.edit().putBoolean("ruler_on", rulerOn).apply()
-                    if (!rulerOn) rulerPts.clear()
-                    refreshRuler()
-                }
+                MenuTile(R.drawable.ic_straighten, "Измерения", rulerOn) { chooseMeasurementMode() }
             ),
             listOf(
                 MenuSection("Карта", listOf(
