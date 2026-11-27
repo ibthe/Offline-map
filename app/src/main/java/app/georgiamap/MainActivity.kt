@@ -1620,7 +1620,7 @@ class MainActivity : AppCompatActivity() {
             }, "Поделиться координатами"))
         }
         action("Ближайшие больницы, полиция и населённые пункты", hasFreshFix && placeDb != null) {
-            showNearbySafetyPlaces(location!!.latitude, location.longitude)
+            location?.let { showNearbySafetyPlaces(it.latitude, it.longitude) }
         }
         action(if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) "Остановить запись трека" else "Начать запись трека") {
             toggleRecording()
@@ -2650,7 +2650,7 @@ class MainActivity : AppCompatActivity() {
             append("Набор: +").append(result.ascentM.roundToInt()).append(" м")
             append("   Сброс: −").append(result.descentM.roundToInt()).append(" м\n")
             result.maxUphillGradePct?.let { append("Максимальный подъём: ").append(it.roundToInt()).append("%\n") }
-            result.maxDownhillGradePct?.let { append("Максимый спуск: ").append(it.roundToInt()).append("%\n") }
+            result.maxDownhillGradePct?.let { append("Максимальный спуск: ").append(it.roundToInt()).append("%\n") }
             append("Оценка рельефа: ").append(difficulty).append("\n")
             append("Покрытие высотными данными: ").append(result.coveragePct).append("%")
         }
