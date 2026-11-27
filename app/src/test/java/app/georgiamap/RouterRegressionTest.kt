@@ -81,6 +81,8 @@ class RouterRegressionTest {
         val g = graph()
         assertNull(g.route(0.0, 0.0, 41.7, 44.8, Profile.CAR))
         assertNull(g.route(91.0, 44.8, 41.7, 44.8, Profile.CAR))
+        assertNull(g.route(Double.NaN, 44.8, 41.7, 44.8, Profile.CAR))
+        assertNull(g.route(41.7, 181.0, 41.7, 44.8, Profile.CAR))
         assertNull(g.route(41.7, 44.8, 41.7, 44.8, 99))
         assertNull(g.route(41.7, 44.8, 41.7, 44.8, Profile.CAR))
 
@@ -88,4 +90,46 @@ class RouterRegressionTest {
         val (mainLat, mainLon) = point(1.0, 1.0)
         assertNull(g.route(41.7035, 44.8040, mainLat, mainLon, Profile.CAR))
     }
+
+    @Test
+    fun sameRoadSegmentSupportsBothTravelDirections() {
+        val g = graph()
+        val (aLat, aLon) = point(1.0, 0.2)
+        val (bLat, bLon) = point(1.0, 0.8)
+
+        assertNotNull(g.route(aLat, aLon, bLat, bLon, Profile.CAR))
+        assertNotNull(g.route(bLat, bLon, aLat, aLon, Profile.CAR))
+    }
+
+    @Test
+    fun bikeProfileCanUseTheStreetNetwork() {
+        val g = graph()
+        val (aLat, aLon) = point(0.0, 0.0)
+        val (bLat, bLon) = point(3.0, 3.0)
+
+        assertNotNull(g.route(aLat, aLon, bLat, bLon, Profile.BIKE))
+    }
+
+    @Test
+    fun roundaboutInstructionsCountTheActualExit() {
+        val g = graph()
+        val cx = lon0 + dLon
+        val cy = lat0 + 3.0 * dLat + 0.005
+        val start = cy to (cx - 0.003)
+        val destinations = listOf(
+            point(3.0, 1.0) to "1-м съезде",
+            (cy to (cx + 0.003)) to "2-м съезде",
+            ((cy + 0.003) to cx) to "3-м съезде"
+        )
+
+        for ((destination, expectedExit) in destinations) {
+            val route = g.route(start.first, start.second, destination.first, destination.second, Profile.CAR)
+            assertNotNull("roundabout route to $expectedExit should exist", route)
+            assertTrue(
+                "expected roundabout instruction for $expectedExit",
+                route!!.steps.any { it.kind == Maneuver.ROUNDABOUT && it.text.contains(expectedExit) }
+            )
+        }
+    }
+
 }

@@ -26,7 +26,6 @@ class NavSessionTest {
         assertTrue(away.offRouteM > 100.0)
         assertTrue(away.remainingM > 100.0)
         assertTrue(away.remainingS > 0.0)
-        assertTrue(away.remainingM > 100.0)
     }
 
     @Test

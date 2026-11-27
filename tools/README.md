@@ -25,3 +25,5 @@ In the app: Menu -> Diagnostics shows the glyph count per script (a mark means O
 
 | `build_routing.py` | builds `routing.bin` (road graph for the offline navigator) from the OSM extract; needs `pip install osmium numpy` |
 | `tests/` | synthetic OSM map + Kotlin check program for the router; `make_test_dem.py` makes a fake relief.mbtiles to try `build_contours.py` offline |
+
+`planetiler_external_data_revision.txt` is a manual cache epoch for datasets fetched by Planetiler's `--download` option. Bump it when those upstream inputs or their selection change, so dependent tiles, search and contour caches are rebuilt.

@@ -60,14 +60,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/georgia.mbtiles
-          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
+          key: tiles-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py') }}
 
       - name: Cache search index
         id: cache_places
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/places.db
-          key: places-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
+          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
 
       - name: Cache relief
         id: cache_relief
@@ -81,7 +81,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/assets/contours.mbtiles
-          key: contours-v2-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}
+          key: contours-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_external_data_revision.txt', 'tools/planetiler_version.txt', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_contours.py', 'tools/build_relief.py') }}
 
       - name: Cache road graph (navigator)
         id: cache_routing
@@ -278,7 +278,7 @@ jobs:
         env:
           OSM_FINGERPRINT: ${{ steps.source.outputs.osm_fingerprint }}
           PLANETILER_VERSION: ${{ steps.planetiler.outputs.version }}
-          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_version.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
+          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
         run: |
           echo "version=${PLANETILER_VERSION}-${OSM_FINGERPRINT}-${DATA_TOOLS}" >> "$GITHUB_OUTPUT"
 

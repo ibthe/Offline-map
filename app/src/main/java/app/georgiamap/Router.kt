@@ -354,8 +354,11 @@ class RoadGraph(buf: ByteBuffer) {
         java.util.Arrays.fill(prev, -2)
         java.util.Arrays.fill(closed, false)
 
-        val vmax = when (p) { Profile.CAR -> 36.0; Profile.FOOT -> 1.5; else -> 8.0 }
-        val tkx = mLon(toLat)
+        val vmax = when (p) { Profile.CAR -> 130.0 / 3.6 + 1e-6; Profile.FOOT -> 1.5; else -> 8.0 }
+        val graphMinLat = gridLat0.toDouble() / 1e6
+        val graphMaxLat = (gridLat0.toDouble() + rows.toDouble() * cell) / 1e6
+        val maxAbsLat = max(abs(toLat), max(abs(graphMinLat), abs(graphMaxLat)))
+        val tkx = mLon(maxAbsLat)
         fun h(v: Int) = hypot((lo(v) - toLon) * tkx, (la(v) - toLat) * M_LAT) / vmax
 
         val heap = Heap()

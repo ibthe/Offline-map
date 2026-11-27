@@ -589,9 +589,16 @@ class MainActivity : AppCompatActivity() {
                         errors.add("$name: $e")
                     }
                 }
-                runOnUiThread { loading.visibility = View.GONE; onReady() }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        onReady()
+                    }
+                }
             } catch (e: Exception) {
-                runOnUiThread { loadingText.text = "Ошибка карты: ${e.message}" }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) loadingText.text = "Ошибка карты: ${e.message}"
+                }
             }
         }
     }
@@ -614,7 +621,10 @@ class MainActivity : AppCompatActivity() {
                     if (bucket != last) {
                         last = bucket
                         val t = if (total > 0) "$mb / ${total shr 20} МБ" else "$mb МБ"
-                        runOnUiThread { loadingText.text = getString(R.string.loading) + "\n$name: $t" }
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed)
+                                loadingText.text = getString(R.string.loading) + "\n$name: $t"
+                        }
                     }
                 }
             }
@@ -655,14 +665,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
         m.addOnMapLongClickListener { ll ->
+            val activeNavigation = navMode == NavMode.ACTIVE
+            val items = if (activeNavigation) arrayOf("Сохранить точку")
+                else arrayOf("Маршрут сюда", "Сохранить точку")
             MaterialAlertDialogBuilder(this).setTitle(Geo.fmtCoord(ll.latitude, ll.longitude))
-                .setItems(arrayOf("Маршрут сюда", "Сохранить точку")) { _, i ->
-                    if (i == 0) setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude)) else addWaypointDialog(ll)
+                .setItems(items) { _, i ->
+                    if (!activeNavigation && i == 0) setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude))
+                    else addWaypointDialog(ll)
                 }.show()
             true
         }
         m.addOnMapClickListener { ll ->
-            if (rulerOn) { rulerPts.add(ll); refreshRuler(); true }
+            if (rulerOn && navMode == NavMode.IDLE) { rulerPts.add(ll); refreshRuler(); true }
             else {
                 val w = if (navMode == NavMode.ACTIVE) null else nearestWaypoint(m, ll)
                 if (w != null) { pendingFrom = null; setDestination(LatLng(w.lat, w.lon), w.name); true } else false
@@ -1026,8 +1040,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshRuler() {
-        src("ovl-ruler")?.setGeoJson(Geo.lineFc(rulerPts))
-        src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(rulerPts))
+        val visible = rulerOn && navMode == NavMode.IDLE
+        val points = if (visible) rulerPts else emptyList()
+        src("ovl-ruler")?.setGeoJson(Geo.lineFc(points))
+        src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(points))
         updateInfo()
     }
 
@@ -1099,7 +1115,7 @@ class MainActivity : AppCompatActivity() {
             sb.append("\nGPS: ±").append(it.accuracy.roundToInt()).append(" м")
             if (it.hasAltitude()) sb.append(", высота ").append(it.altitude.roundToInt()).append(" м")
         } ?: run { if (locActive) sb.append("\nGPS: ожидание сигнала…") }
-        if (rulerOn) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
+        if (rulerOn && navMode == NavMode.IDLE) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
             .append(" (тап — новая точка)")
         if (TrackService.running) sb.append("\n● REC трек пишется")
         tvInfo.text = sb.toString()
@@ -2160,6 +2176,7 @@ class MainActivity : AppCompatActivity() {
             NavMode.PREVIEW -> session?.let { setSummary(it.totalM, it.route.timeS, offRoadNote(it.route)) }
             else -> {}
         }
+        refreshRuler()
         updateFloatingControls()
         bar.post { updateControlsMargin(); applyMapUiMargins() }
     }
