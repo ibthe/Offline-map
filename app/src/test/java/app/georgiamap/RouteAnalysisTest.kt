@@ -92,5 +92,9 @@ class RouteAnalysisTest {
             ))
             throw AssertionError("non-monotonic distances were accepted")
         } catch (_: IllegalArgumentException) { }
+        try {
+            RouteAnalysis.calculate(listOf(RouteAnalysis.Sample(Double.NaN, 1.0)), 0.0)
+            throw AssertionError("non-finite first sample distance was accepted")
+        } catch (_: IllegalArgumentException) { }
     }
 }
