@@ -1796,17 +1796,59 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ waypoints
 
     private fun addWaypointDialog(ll: LatLng) {
-        val et = EditText(this)
-        et.setText("Точка ${waypointCache.size + 1}")
-        et.setSelectAllOnFocus(true)
+        val name = EditText(this).apply {
+            setText("Точка ${waypointCache.size + 1}")
+            setSelectAllOnFocus(true)
+            hint = "Название"
+        }
+        val note = EditText(this).apply {
+            hint = "Заметка (необязательно)"
+            minLines = 2
+            maxLines = 4
+            setSingleLine(false)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(20f)
+            setPadding(pad, dp(8f), pad, 0)
+            addView(name, LinearLayout.LayoutParams(-1, -2))
+            addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle("Сохранить точку\n" + Geo.fmtCoord(ll.latitude, ll.longitude))
-            .setView(et)
+            .setView(content)
             .setPositiveButton("Сохранить") { _, _ ->
-                userDb.addWaypoint(et.text.toString().ifBlank { "Точка" }, ll.latitude, ll.longitude)
+                userDb.addWaypoint(name.text.toString().ifBlank { "Точка" },
+                    ll.latitude, ll.longitude, note.text.toString())
                 refreshWaypoints()
             }
             .setNegativeButton("Отмена", null).show()
+    }
+
+    private fun editWaypointNote(waypoint: UserDb.Wpt) {
+        val note = EditText(this).apply {
+            setText(waypoint.note)
+            hint = "Заметка"
+            minLines = 3
+            maxLines = 6
+            setSingleLine(false)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Заметка: ${waypoint.name}")
+            .setView(note)
+            .setPositiveButton("Сохранить") { _, _ ->
+                userDb.updateWaypointNote(waypoint.id, note.text.toString())
+                refreshWaypoints()
+                toast("Заметка сохранена")
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun showWaypoints() {
@@ -1817,7 +1859,7 @@ class MainActivity : AppCompatActivity() {
         progress.show()
         thread(name = "waypoint-list") {
             val list = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
-            val items = list.map { (if (it.favorite) "★ " else "") + it.name + "\n" + Geo.fmtCoord(it.lat, it.lon) }.toTypedArray()
+            val items = list.map { (if (it.favorite) "★ " else "") + it.name + "\n" + Geo.fmtCoord(it.lat, it.lon) + (if (it.note.isNotBlank()) "\n" + it.note.take(60) else "") }.toTypedArray()
             runOnUiThread {
                 if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
                 progress.dismiss()
@@ -1826,12 +1868,13 @@ class MainActivity : AppCompatActivity() {
                     val w = list[i]
                     val favoriteAction = if (w.favorite) "Убрать из избранного" else "В избранное"
                     MaterialAlertDialogBuilder(this).setTitle(w.name)
-                        .setItems(arrayOf("Перейти", "Маршрут сюда", favoriteAction, "Удалить")) { _, a ->
+                         .setItems(arrayOf("Перейти", "Маршрут сюда", favoriteAction, "Заметка", "Удалить")) { _, a ->
                             when (a) {
                                 0 -> flyTo(w.lat, w.lon, 15.0)
                                 1 -> setDestination(LatLng(w.lat, w.lon), w.name)
                                 2 -> { userDb.setWaypointFavorite(w.id, !w.favorite); refreshWaypoints(); toast(if (w.favorite) "Убрано из избранного" else "Добавлено в избранное") }
-                                3 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
+                                3 -> editWaypointNote(w)
+                                4 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
                             }
                         }.show()
                 }.show()
