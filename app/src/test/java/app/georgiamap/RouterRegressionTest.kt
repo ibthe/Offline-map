@@ -136,6 +136,26 @@ class RouterRegressionTest {
     }
 
     @Test
+    fun avoidancePreferencesChoosePavedAlternativeToRoughHikingShortcut() {
+        val g = graph()
+        val (aLat, aLon) = point(0.0, 0.0)
+        val (bLat, bLon) = point(3.0, 3.0)
+        val normal = g.route(aLat, aLon, bLat, bLon, Profile.FOOT)
+        val avoidUnpaved = g.route(aLat, aLon, bLat, bLon, Profile.FOOT,
+            RoutePreference.FASTEST, RouteAvoidance.UNPAVED)
+        val avoidDifficult = g.route(aLat, aLon, bLat, bLon, Profile.FOOT,
+            RoutePreference.FASTEST, RouteAvoidance.DIFFICULT_TRAILS)
+
+        assertNotNull(normal)
+        assertNotNull(avoidUnpaved)
+        assertNotNull(avoidDifficult)
+        assertTrue(avoidUnpaved!!.distanceM > normal!!.distanceM * 1.2)
+        assertTrue(avoidDifficult!!.distanceM > normal.distanceM * 1.2)
+        assertNull(g.route(aLat, aLon, bLat, bLon, Profile.FOOT,
+            RoutePreference.FASTEST, RouteAvoidance.ALL + 1))
+    }
+
+    @Test
     fun roundaboutInstructionsCountTheActualExit() {
         val g = graph()
         val cx = lon0 + dLon
