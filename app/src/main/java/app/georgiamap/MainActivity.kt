@@ -577,6 +577,7 @@ class MainActivity : AppCompatActivity() {
                 loadingText.text = "Пакет «${mapPackage.title}» повреждён или содержит неполные данные"
                 return
             }
+            loading.visibility = View.GONE
             onReady()
             return
         }
@@ -2027,7 +2028,7 @@ class MainActivity : AppCompatActivity() {
 
         val tileFile = tilesFile
         val reliefPresent = elevation != null
-        val contoursFile = mapPackage.contoursAsset?.let { File(filesDir, it) }
+        val contoursFile = mapPackage.contoursAsset?.let { mapPackage.file(filesDir, it) }
         val iconCount = markImages().size
         val rendered = ArrayList<Pair<String, Int>>()
         val m = map
@@ -2390,7 +2391,8 @@ class MainActivity : AppCompatActivity() {
             else arrayOf(routeOptionLabel("Короче", options[0]), routeOptionLabel("Быстрее", options[1]))
             MaterialAlertDialogBuilder(this).setTitle("Выберите маршрут")
                 .setItems(labels) { _, index -> showRoutePreview(options[index]) }
-                .setNegativeButton("Отмена", null)
+                .setNegativeButton("Отмена") { _, _ -> updateNavUi() }
+                .setOnCancelListener { updateNavUi() }
                 .show()
         }
     }
@@ -2482,7 +2484,7 @@ class MainActivity : AppCompatActivity() {
     /** Runs the search on a worker thread (the road graph is loaded from the selected package on first use). */
     private fun computeRoute(from: LatLng, to: LatLng, silent: Boolean, done: (RouteResult?, String?) -> Unit) {
         val requestId = ++routeRequestId
-        val f = mapPackage.routingAsset?.let { File(filesDir, it) }
+        val f = mapPackage.routingAsset?.let { mapPackage.file(filesDir, it) }
         if (f == null || !f.isFile) {
             if (requestId == routeRequestId) done(null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
             return
