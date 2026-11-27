@@ -5,6 +5,7 @@ import sqlite3
 import sys
 
 import mvt
+from places_fts import create_fts_index
 
 src, dst = sys.argv[1], sys.argv[2]
 db = sqlite3.connect(src)
@@ -76,6 +77,7 @@ for zoom, x, row, blob in db.execute("select zoom_level, tile_column, tile_row, 
 out = sqlite3.connect(dst)
 out.executescript("""
 drop table if exists places;
+drop table if exists places_fts;
 create table places(id integer primary key, ka text, ru text, en text, s text,
                     kind text, cls text, sub text, prio integer, ele integer, lat real, lon real);
 """)
@@ -86,6 +88,7 @@ for (ka, ru, en, kind, cls, sub, prio, ele, lat, lon) in found.values():
         s += "\n" + HUB_WORDS[kind]
     rows.append((ka, ru, en, s, kind, cls, sub, prio, ele, lat, lon))
 out.executemany("insert into places(ka,ru,en,s,kind,cls,sub,prio,ele,lat,lon) values (?,?,?,?,?,?,?,?,?,?,?)", rows)
+create_fts_index(out)
 out.commit()
 out.execute("vacuum")
 print("tiles scanned:", tiles, "| places indexed:", len(rows))

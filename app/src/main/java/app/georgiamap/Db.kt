@@ -171,16 +171,40 @@ class PlaceDb(path: String) {
     fun search(query: String, limit: Int = 40): List<Place> {
         val q = query.trim().lowercase().replace("ё", "е").replace("%", "").replace("_", "")
         if (q.isEmpty()) return emptyList()
-        val out = ArrayList<Place>()
-        db.rawQuery(
-            "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where s like ? " +
-                "order by case when s like ? or s like ? then 0 else 1 end, prio, length(s) limit $limit",
-            arrayOf("%$q%", "$q%", "%\n$q%")
-        ).use { c ->
-            while (c.moveToNext()) {
-                out.add(Place(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "",
-                    c.getString(3) ?: "", c.getDouble(4), c.getDouble(5), c.getInt(6)))
+        val maxResults = limit.coerceIn(1, 200)
+        val out = ArrayList<Place>(maxResults)
+        val seen = HashSet<String>()
+
+        fun append(c: android.database.Cursor) {
+            val place = Place(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "",
+                c.getString(3) ?: "", c.getDouble(4), c.getDouble(5), c.getInt(6))
+            val key = place.ka + "|" + place.ru + "|" + place.en + "|" + place.lat + "|" + place.lon
+            if (seen.add(key)) out.add(place)
+        }
+
+        val tokens = Regex("[\\p{L}\\p{N}]+").findAll(q).map { it.value }.toList()
+        if (tokens.isNotEmpty()) {
+            val match = tokens.joinToString(" AND ") { "$it*" }
+            try {
+                db.rawQuery(
+                    "select p.ka,p.ru,p.en,p.kind,p.lat,p.lon,ifnull(p.ele,0) " +
+                        "from places_fts f join places p on p.id=f.docid " +
+                        "where places_fts match ? " +
+                        "order by case when p.s like ? or p.s like ? then 0 else 1 end, p.prio, length(p.s) limit ?",
+                    arrayOf(match, q + "%", "%\n" + q + "%", maxResults.toString())
+                ).use { c -> while (c.moveToNext() && out.size < maxResults) append(c) }
+            } catch (_: Exception) {
+                // Older or vendor SQLite builds may lack FTS4; the substring fallback remains available.
             }
+        }
+
+        // Preserve the original substring behavior for partial words and matches inside a name.
+        if (out.isEmpty()) {
+            db.rawQuery(
+                "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where s like ? " +
+                    "order by case when s like ? or s like ? then 0 else 1 end, prio, length(s) limit ?",
+                arrayOf("%" + q + "%", q + "%", "%\n" + q + "%", maxResults.toString())
+            ).use { c -> while (c.moveToNext() && out.size < maxResults) append(c) }
         }
         return out
     }

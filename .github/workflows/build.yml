@@ -73,10 +73,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: app/src/main/assets/places.db
-          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/places_fts.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-
-            places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
+            places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/places_fts.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-
+            places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/places_fts.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}
 
       - name: Cache relief
         id: cache_relief
@@ -299,7 +299,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: app/src/main/assets/places.db
-          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: places-v2-${{ steps.planetiler.outputs.version }}-${{ steps.source.outputs.osm_fingerprint }}-${{ hashFiles('tools/osm_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/build_places.py', 'tools/places_fts.py', 'tools/mvt.py', 'tools/fetch_osm.py', 'tools/finalize_tiles.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save rebuilt relief cache
         if: steps.cache_save.outputs.relief == 'true'
@@ -354,7 +354,7 @@ jobs:
         env:
           OSM_FINGERPRINT: ${{ steps.source.outputs.osm_fingerprint }}
           PLANETILER_VERSION: ${{ steps.planetiler.outputs.version }}
-          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
+          DATA_TOOLS: ${{ hashFiles('tools/osm_data_revision.txt', 'tools/terrain_data_revision.txt', 'tools/planetiler_version.txt', 'tools/planetiler_external_data_revision.txt', 'tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/mvt.py', 'tools/build_places.py', 'tools/places_fts.py', 'tools/build_routing.py', 'tools/build_relief.py', 'tools/build_contours.py') }}
         run: |
           echo "version=${PLANETILER_VERSION}-${OSM_FINGERPRINT}-${DATA_TOOLS}" >> "$GITHUB_OUTPUT"
 
@@ -365,7 +365,7 @@ jobs:
       - name: Prepare synthetic routing graph for regression tests
         run: |
           python -m pip install --quiet osmium numpy
-          python -m unittest tools.tests.test_build_routing
+          python -m unittest tools.tests.test_build_routing tools.tests.test_places_fts
           python tools/tests/make_test_osm.py "$RUNNER_TEMP/router-test.osm"
           python tools/build_routing.py "$RUNNER_TEMP/router-test.osm" "$RUNNER_TEMP/router-test.bin"
           echo "ROUTER_TEST_GRAPH=$RUNNER_TEMP/router-test.bin" >> "$GITHUB_ENV"

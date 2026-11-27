@@ -33,7 +33,12 @@ def check_places(path):
         db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
         try:
             cols = {r[1] for r in db.execute("pragma table_info(places)")}
-            return {"ka", "ru", "en", "s", "kind", "lat", "lon"}.issubset(cols)
+            names = {r[0] for r in db.execute("select name from sqlite_master where type='table'")}
+            if not {"ka", "ru", "en", "s", "kind", "lat", "lon"}.issubset(cols) or "places_fts" not in names:
+                return False
+            place_count = db.execute("select count(*) from places").fetchone()[0]
+            fts_count = db.execute("select count(*) from places_fts").fetchone()[0]
+            return fts_count == place_count
         finally:
             db.close()
     except Exception:
