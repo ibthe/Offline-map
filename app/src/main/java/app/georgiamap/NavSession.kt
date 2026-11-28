@@ -15,6 +15,7 @@ class NavSession(val route: RouteResult, val profile: Int) {
     private val n = route.pointCount
     val cum = DoubleArray(n)
     private var seg = 0
+    private var furthestAlongM = 0.0
 
     init {
         require(n > 0) { "A navigation route must contain at least one point" }
@@ -65,7 +66,19 @@ class NavSession(val route: RouteResult, val profile: Int) {
         scan(max(0, seg - 3), min(n - 1, seg + 80))      // normal case: we are near where we were
         if (bestD > 120.0) scan(0, n - 1)                // lost: look at the whole route
         seg = bestSeg
-        val along = cum[seg] + bestT * (cum[seg + 1] - cum[seg])
+        val projectedAlong = cum[seg] + bestT * (cum[seg + 1] - cum[seg])
+
+        // Route progress must not run backwards when GPS snaps to an earlier segment
+        // (common on loops, switchbacks and when the user retraces a short section).
+        // A meaningful backwards displacement is treated as off-route so guidance can
+        // recalculate instead of silently rewinding the next manoeuvre.
+        val trustedProjectionM = max(60.0, offRouteLimitM * 2.0)
+        val backtrackM = if (bestD <= trustedProjectionM) {
+            max(0.0, furthestAlongM - projectedAlong - max(20.0, offRouteLimitM))
+        } else 0.0
+        if (bestD <= trustedProjectionM) furthestAlongM = max(furthestAlongM, projectedAlong)
+        val along = if (bestD <= trustedProjectionM) max(projectedAlong, furthestAlongM) else furthestAlongM
+        val offRoute = max(bestD, backtrackM)
         val remaining = max(0.0, totalM - along)
         var k = route.steps.size - 1
         for (i in 1 until route.steps.size) {
@@ -83,6 +96,6 @@ class NavSession(val route: RouteResult, val profile: Int) {
             else -> remaining
         }
         if (!arrived && remaining <= arriveRadiusM) toStep = destinationDistance
-        return NavProgress(along, remainingForUi, bestD, k, toStep, remainingForUi / avgSpeed, arrived)
+        return NavProgress(along, remainingForUi, offRoute, k, toStep, remainingForUi / avgSpeed, arrived)
     }
 }
