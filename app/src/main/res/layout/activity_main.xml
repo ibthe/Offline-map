@@ -146,6 +146,7 @@
             android:src="@drawable/ic_fit" />
 
         <View
+            android:id="@+id/fitDivider"
             android:layout_width="@dimen/space_5"
             android:layout_height="1dp"
             android:layout_gravity="center_horizontal"
@@ -322,6 +323,17 @@
                 android:background="@drawable/bg_chip"
                 android:gravity="center"
                 android:text="Пешком"
+                android:textAppearance="@style/TextAppearance.Georgia.Label" />
+
+            <TextView
+                android:id="@+id/navProfHike"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="@dimen/space_2"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:text="Поход"
                 android:textAppearance="@style/TextAppearance.Georgia.Label" />
 
             <TextView

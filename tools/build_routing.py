@@ -27,7 +27,10 @@ CAR_KMH = {"motorway": 90, "motorway_link": 50, "trunk": 80, "trunk_link": 50, "
            "residential": 30, "road": 30, "service": 20, "track": 15, "living_street": 15}
 UNPAVED = {"unpaved", "gravel", "dirt", "ground", "earth", "mud", "sand", "grass", "fine_gravel", "compacted",
            "pebblestone", "dirt/sand"}
-DENY = {"no", "private", "customers", "delivery"}
+TRACK_GRADE = {"grade1": 1, "grade2": 2, "grade3": 3, "grade4": 4, "grade5": 5}
+SMOOTHNESS = {"excellent": 1, "good": 2, "intermediate": 3, "bad": 4,
+              "very_bad": 5, "horrible": 6, "very_horrible": 7, "impassable": 7}
+DENY = {"no", "private", "customers", "delivery", "destination", "agricultural", "forestry", "discouraged"}
 YES = {"yes", "designated", "permissive", "official"}
 
 
@@ -50,10 +53,30 @@ def allowed(t, keys, default):
     return default
 
 
+def direction_access(access, oneway):
+    """Return (forward, backward) access, honoring OSM's directional values."""
+    if not access:
+        return False, False
+    value = str(oneway or "").strip().lower()
+    if value in ("yes", "true", "1"):
+        return True, False
+    if value in ("-1", "reverse"):
+        return False, True
+    return True, True
+
+
+def first_tag(tags, keys, default=None):
+    for key in keys:
+        value = tags.get(key)
+        if value is not None:
+            return value
+    return default
+
+
 def way_props(t):
     hw = t.get("highway")
     rb = t.get("junction") in ("roundabout", "circular")
-    car = hw not in NO_CAR and allowed(t, ("motor_vehicle", "vehicle", "access"), True)
+    car = hw not in NO_CAR and allowed(t, ("motorcar", "motor_vehicle", "vehicle", "access"), True)
     foot = hw not in ("motorway", "motorway_link") and allowed(t, ("foot", "access"), True)
     bike_default = hw not in ("motorway", "motorway_link", "steps")
     if hw in ("footway", "pedestrian"):
@@ -61,12 +84,20 @@ def way_props(t):
     bike = bike_default and allowed(t, ("bicycle", "vehicle", "access"), bike_default)
     if hw == "steps":
         bike = False
-    ow = t.get("oneway")
-    fwd_only = ow in ("yes", "true", "1") or rb or (hw in ("motorway", "motorway_link") and ow != "no")
-    bwd_only = ow in ("-1", "reverse")
-    car_f, car_b = car and not bwd_only, car and not fwd_only
-    bike_ow = (fwd_only or bwd_only) and t.get("oneway:bicycle") != "no" and not str(t.get("cycleway", "")).startswith("opposite")
-    bike_f, bike_b = bike and not (bwd_only and bike_ow), bike and not (fwd_only and bike_ow)
+
+    general_oneway = t.get("oneway")
+    if general_oneway is None and (rb or hw in ("motorway", "motorway_link")):
+        general_oneway = "yes"
+    car_oneway = first_tag(t, ("oneway:motorcar", "oneway:motor_vehicle"), general_oneway)
+    bike_oneway = t.get("oneway:bicycle")
+    if bike_oneway is None:
+        bike_oneway = "no" if str(t.get("cycleway", "")).startswith("opposite") else general_oneway
+    foot_oneway = t.get("oneway:foot", "no")
+
+    car_f, car_b = direction_access(car, car_oneway)
+    foot_f, foot_b = direction_access(foot, foot_oneway)
+    bike_f, bike_b = direction_access(bike, bike_oneway)
+
     unpaved = t.get("surface") in UNPAVED or (hw == "track" and t.get("tracktype", "grade3") not in ("grade1", "grade2"))
     sp = CAR_KMH.get(hw, 30)
     ms = kmh(t.get("maxspeed"))
@@ -75,8 +106,13 @@ def way_props(t):
     if unpaved:
         sp = min(sp, 20 if hw == "track" else 30)
     sp = int(max(5, min(130, round(sp))))
-    flags = (int(car_f) | int(foot) << 1 | int(bike_f) << 2 | int(car_b) << 3 | int(foot) << 4 | int(bike_b) << 5
-             | sp << 6 | CLS[hw] << 14 | int(rb) << 18 | int(unpaved) << 19)
+    track_grade = TRACK_GRADE.get(str(t.get("tracktype", "")).lower(), 0)
+    smoothness = SMOOTHNESS.get(str(t.get("smoothness", "")).lower(), 0)
+    toll = str(t.get("toll", "")).lower() in ("yes", "true", "1")
+    flags = (int(car_f) | int(foot_f) << 1 | int(bike_f) << 2 |
+             int(car_b) << 3 | int(foot_b) << 4 | int(bike_b) << 5 |
+             sp << 6 | CLS[hw] << 14 | int(rb) << 18 | int(unpaved) << 19 |
+             track_grade << 20 | smoothness << 23 | int(toll) << 26)
     if not (car or foot or bike):
         return None
     name = t.get("name:ru") or t.get("name") or t.get("name:en") or t.get("ref") or ""
@@ -159,7 +195,8 @@ def main(src, out):
                         geoms.append(g)
                 start = i
 
-    # drop tiny disconnected fragments (parking aisles cut by the extract, etc.)
+    # Remove only likely one-edge parking/driveway fragments. The previous >=8-edge
+    # threshold also discarded real short streets, named access roads and hiking paths.
     parent = list(range(len(node_lat)))
 
     def find(x):
@@ -172,9 +209,14 @@ def main(src, out):
         ra, rb_ = find(a), find(b)
         if ra != rb_:
             parent[ra] = rb_
-    ec = Counter(find(a) for a in eA)
-    keep = [i for i in range(len(eA)) if ec[find(eA[i])] >= 8]
-    print(f"edges: {len(eA)} -> kept {len(keep)} after removing tiny islands")
+    roots = [find(a) for a in eA]
+    ec = Counter(roots)
+    named_components = {roots[i] for i, name in enumerate(eName) if name != 0}
+    keep = [
+        i for i, root in enumerate(roots)
+        if ec[root] >= 2 or root in named_components or ((eFlags[i] >> 14) & 0xF) in (7, 8, 9)
+    ]
+    print(f"edges: {len(eA)} -> kept {len(keep)} after filtering isolated unnamed minor fragments")
     used = sorted({eA[i] for i in keep} | {eB[i] for i in keep})
     remap = {old: new for new, old in enumerate(used)}
     nlat = np.array([node_lat[o] for o in used], dtype="<i4")

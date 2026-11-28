@@ -21,7 +21,7 @@ for c in range(4):
     if c == 3: t["oneway"] = "yes"
     W(1100 + c, [nid(r, c) for r in range(4)], t)
 N(200, LAT0 + 1.5 * DLA, LON0 + 1.5 * DLO)
-W(1200, [nid(0, 0), 200, nid(3, 3)], {"highway": "footway", "name": "Tropinka"})
+W(1200, [nid(0, 0), 200, nid(3, 3)], {"highway": "footway", "name": "Tropinka", "surface": "gravel", "tracktype": "grade5", "smoothness": "bad"})
 cx, cy, rad = LON0 + 1 * DLO, LAT0 + 3 * DLA + 0.0045 + 0.0005, 0.0005
 N(300, cy, cx - rad); N(301, cy - rad, cx); N(302, cy, cx + rad); N(303, cy + rad, cx)
 W(1300, [300, 301, 302, 303, 300], {"highway": "residential", "junction": "roundabout"})

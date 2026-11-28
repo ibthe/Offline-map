@@ -1,0 +1,159 @@
+name: Build Regional Map Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_id:
+        description: "Unique lowercase package id, for example armenia"
+        required: true
+        default: armenia
+        type: string
+      title:
+        description: "Display name shown in the app"
+        required: true
+        default: Армения
+        type: string
+      country_code:
+        description: "ISO 3166-1 alpha-2 code"
+        required: true
+        default: AM
+        type: string
+      emergency_number:
+        description: "Verified local emergency number for this region (digits, optional leading +)"
+        required: true
+        type: string
+      osm_url:
+        description: "Direct URL to the region's .osm.pbf extract"
+        required: true
+        type: string
+      south:
+        description: "Southern latitude"
+        required: true
+        default: "38.8"
+        type: string
+      west:
+        description: "Western longitude"
+        required: true
+        default: "43.4"
+        type: string
+      north:
+        description: "Northern latitude"
+        required: true
+        default: "41.3"
+        type: string
+      east:
+        description: "Eastern longitude"
+        required: true
+        default: "46.7"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read pinned Planetiler release
+        id: planetiler
+        run: |
+          version="$(tr -d '[:space:]' < tools/planetiler_version.txt)"
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid Planetiler version: $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download and validate regional OSM extract
+        env:
+          OSM_URL: ${{ inputs.osm_url }}
+        run: |
+          mkdir -p data app/src/main/assets
+          curl -L --fail --retry 3 --retry-all-errors "$OSM_URL" -o data/region.osm.pbf
+          python tools/check_cached_assets.py osm data/region.osm.pbf
+
+      - name: Download Planetiler
+        run: |
+          curl -L --fail --retry 3 -o data/planetiler.jar \
+            https://github.com/onthegomap/planetiler/releases/download/${{ steps.planetiler.outputs.version }}/planetiler.jar
+
+      - name: Build vector tiles
+        run: |
+          java -Xmx4g -jar data/planetiler.jar \
+            --osm-path=data/region.osm.pbf \
+            --download \
+            --output=app/src/main/assets/tiles.mbtiles \
+            --force \
+            --maxzoom=14
+          python tools/finalize_tiles.py app/src/main/assets/tiles.mbtiles
+          python tools/check_region_tiles.py app/src/main/assets/tiles.mbtiles
+
+      - name: Build offline search index
+        run: |
+          python tools/build_places.py app/src/main/assets/tiles.mbtiles app/src/main/assets/places.db
+          python tools/check_cached_assets.py places app/src/main/assets/places.db
+
+      - name: Build offline routing graph
+        run: |
+          python -m pip install --quiet osmium numpy scipy contourpy pillow
+          python tools/build_routing.py data/region.osm.pbf app/src/main/assets/routing.bin
+          python tools/check_cached_assets.py routing app/src/main/assets/routing.bin
+
+      - name: Build offline relief and contour lines
+        env:
+          WEST: ${{ inputs.west }}
+          SOUTH: ${{ inputs.south }}
+          EAST: ${{ inputs.east }}
+          NORTH: ${{ inputs.north }}
+        run: |
+          BBOX="$WEST,$SOUTH,$EAST,$NORTH"
+          python tools/build_relief.py app/src/main/assets/relief.mbtiles --bbox "$BBOX" --maxzoom 11
+          python tools/check_cached_assets.py relief app/src/main/assets/relief.mbtiles
+          python tools/build_contours.py app/src/main/assets/contours.mbtiles \
+            --relief app/src/main/assets/relief.mbtiles \
+            --like app/src/main/assets/tiles.mbtiles \
+            --bbox "$BBOX" --minzoom 8 --maxzoom 12
+          python tools/check_cached_assets.py contours app/src/main/assets/contours.mbtiles
+
+      - name: Package regional map
+        env:
+          PACKAGE_ID: ${{ inputs.package_id }}
+          PACKAGE_TITLE: ${{ inputs.title }}
+          COUNTRY_CODE: ${{ inputs.country_code }}
+          EMERGENCY_NUMBER: ${{ inputs.emergency_number }}
+          SOUTH: ${{ inputs.south }}
+          WEST: ${{ inputs.west }}
+          NORTH: ${{ inputs.north }}
+          EAST: ${{ inputs.east }}
+        run: |
+          python tools/package_map.py \
+            --id "$PACKAGE_ID" \
+            --title "$PACKAGE_TITLE" \
+            --country-code "$COUNTRY_CODE" \
+            --emergency-number "$EMERGENCY_NUMBER" \
+            --bounds "$SOUTH" "$WEST" "$NORTH" "$EAST" \
+            --tiles app/src/main/assets/tiles.mbtiles \
+            --places app/src/main/assets/places.db \
+            --relief app/src/main/assets/relief.mbtiles \
+            --contours app/src/main/assets/contours.mbtiles \
+            --routing app/src/main/assets/routing.bin \
+            --output "$RUNNER_TEMP/$PACKAGE_ID.gmap"
+          ls -lh "$RUNNER_TEMP/$PACKAGE_ID.gmap"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: map-package-${{ inputs.package_id }}
+          path: ${{ runner.temp }}/${{ inputs.package_id }}.gmap
+          compression-level: 0

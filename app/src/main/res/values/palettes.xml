@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- five colour themes; the same style names exist in values/ (light) and values-night/ (dark) -->
+    <!-- seven colour themes; the same style names exist in values/ (light) and values-night/ (dark) -->
     <style name="ThemeOverlay.Georgia.Ocean" parent="">
         <item name="gmPanel">#F2FFFFFF</item>
         <item name="gmPanelStroke">#4714323F</item>

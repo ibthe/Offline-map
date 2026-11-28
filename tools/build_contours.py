@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds contours.mbtiles: vector tiles (layer "contour") with elevation lines (горизонтали) for Georgia.
+"""Builds contours.mbtiles: vector tiles (layer "contour") with elevation lines (горизонтали) for a region.
 
 The heights come from the same public AWS Terrain Tiles (Terrarium PNG) that relief.mbtiles uses. Tiles that are
 already inside relief.mbtiles are read from there, the rest (z12) are downloaded once and cached.

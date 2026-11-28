@@ -4,6 +4,7 @@
 |---|---|
 | `gen_style.py` | writes `style_<palette>[_dark].json` (colors, roads, labels); `--palette=ocean|forest|dusk|lavender|graphite` re-colours the base look |
 | `build_glyphs.py` | builds the label font (SDF `.pbf`) for Latin + Cyrillic + Georgian: tries GitHub glyph repos / TTF fonts / system fonts, judges every candidate by its number of real glyphs (not by file size) and fails the build if `თბილისი Тбилиси Tbilisi` cannot be drawn |
+| `build_relief.py` | builds `relief.mbtiles` (Terrarium elevation tiles) for a requested region; `--bbox=west,south,east,north`, `--maxzoom` (0–11) |
 | `build_contours.py` | builds `contours.mbtiles` (vector contour lines, layer `contour`, attributes `ele`, `major`) from the Terrarium DEM; `--relief`, `--like`, `--bbox`; needs `pip install numpy scipy pillow contourpy` |
 | `gen_icons.py` | writes the map-marker icons `res/drawable/ic_cat_*.xml` (badge + white glyph) and optionally a PNG preview: `python gen_icons.py <drawable dir> preview.png` |
 | `check_tiles.py` | fails the build if the tiles have no `name:ka` / `name:ru` / English names |
@@ -25,3 +26,19 @@ In the app: Menu -> Diagnostics shows the glyph count per script (a mark means O
 
 | `build_routing.py` | builds `routing.bin` (road graph for the offline navigator) from the OSM extract; needs `pip install osmium numpy` |
 | `tests/` | synthetic OSM map + Kotlin check program for the router; `make_test_dem.py` makes a fake relief.mbtiles to try `build_contours.py` offline |
+
+`planetiler_external_data_revision.txt` is a manual cache epoch for datasets fetched by Planetiler's `--download` option. Bump it when those upstream inputs or their selection change, so dependent tiles, search and contour caches are rebuilt.
+
+
+## Regional terrain packages
+
+The **Build Regional Map Package** workflow accepts bounds in south/west/north/east order.
+It converts them to west/south/east/north for the terrain tools, builds `relief.mbtiles`
+with `build_relief.py`, then builds `contours.mbtiles` with `build_contours.py --like`
+so contour tiles are limited to the actual vector-map coverage. Both assets are included
+in the resulting `.gmap`. Terrain coverage depends on the upstream Terrarium DEM; the
+profile must report missing samples rather than treating them as sea level or zero height.
+
+Regional package manifests accept `emergencyNumber`. The regional workflow requires the builder to supply a verified local number; the app does not assume that Georgia's 112 applies to every installed country.
+
+`build_routing.py` stores `tracktype` grade (bits 20–22) and OSM `smoothness` (bits 23–25) and `toll=yes` (bit 26) in edge flags. The app uses these fields together with the unpaved and highway-class flags to apply soft route-avoidance preferences; missing OSM tags remain unknown rather than being guessed.

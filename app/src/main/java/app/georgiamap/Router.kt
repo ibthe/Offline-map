@@ -15,6 +15,21 @@ object Profile {
     const val CAR = 0
     const val FOOT = 1
     const val BIKE = 2
+    const val HIKE = 3
+}
+
+object RoutePreference {
+    const val FASTEST = 0
+    const val SHORTEST = 1
+}
+
+object RouteAvoidance {
+    const val NONE = 0
+    const val UNPAVED = 1
+    const val STEPS = 2
+    const val DIFFICULT_TRAILS = 4
+    const val TOLLS = 8
+    const val ALL = 15
 }
 
 object Maneuver {
@@ -52,7 +67,11 @@ class RouteStep(
 class RouteResult(
     val points: DoubleArray, val distanceM: Double, val timeS: Double, val steps: List<RouteStep>,
     /** distance from the requested start / end point to the road the route was attached to (0 = on the road) */
-    val startOffM: Double = 0.0, val endOffM: Double = 0.0
+    val startOffM: Double = 0.0, val endOffM: Double = 0.0,
+    /** Cost used to select this route after applying user avoidance preferences. */
+    val preferenceCost: Double = timeS,
+    /** Avoidance preferences that could not be fully satisfied by the available road graph. */
+    val warnings: List<String> = emptyList()
 ) {
     val pointCount get() = points.size / 2
     fun lat(i: Int) = points[2 * i]
@@ -103,6 +122,30 @@ class RoadGraph(buf: ByteBuffer) {
         rows = buf.int
         cols = buf.int
         val nGrid = buf.int
+
+        // Imported regional packages are external input. Validate the complete binary
+        // layout before allocating arrays from counts stored in the file header.
+        require(nN in 2 until Int.MAX_VALUE && nM in 1..(Int.MAX_VALUE / 2) &&
+            nP >= 2L * nM && nNames in 1 until Int.MAX_VALUE && nameLen >= 0 &&
+            cell > 0 && rows > 0 && cols > 0 && nGrid in nM until Int.MAX_VALUE) {
+            "invalid routing graph dimensions"
+        }
+        val gridCells = try { Math.multiplyExact(rows.toLong(), cols.toLong()) }
+            catch (_: ArithmeticException) { throw IllegalArgumentException("routing graph grid dimensions overflow") }
+        require(gridCells in 1 until Int.MAX_VALUE.toLong()) { "routing graph grid is too large" }
+        var expectedPayload = 0L
+        fun addArray(count: Long, bytesPerItem: Long) {
+            expectedPayload = Math.addExact(expectedPayload, Math.multiplyExact(count, bytesPerItem))
+        }
+        addArray(2L * nN, 4L)                 // node latitude / longitude
+        addArray(5L * nM + nM + 1L, 4L)      // edge arrays and geometry offsets
+        addArray(2L * nP, 4L)                 // geometry coordinates
+        addArray(gridCells + 1L, 4L)          // grid offsets
+        addArray(nGrid.toLong(), 4L)          // grid edge references
+        addArray(nNames.toLong() + 1L, 4L)   // name offsets
+        addArray(nameLen.toLong(), 1L)        // UTF-8 name bytes
+        require(expectedPayload == buf.remaining().toLong()) { "routing graph size does not match its header" }
+
         nodeLat = ints(buf, nN)
         nodeLon = ints(buf, nN)
         eA = ints(buf, nM)
@@ -117,6 +160,24 @@ class RoadGraph(buf: ByteBuffer) {
         gridEdge = ints(buf, nGrid)
         nameOff = ints(buf, nNames + 1)
         nameBytes = ByteArray(nameLen).also { buf.get(it) }
+
+        require(nodeLat.all { it in -90_000_000..90_000_000 } &&
+            nodeLon.all { it in -180_000_000..180_000_000 }) { "routing graph contains invalid node coordinates" }
+        require(eA.indices.all { eA[it] in 0 until nN && eB[it] in 0 until nN &&
+            eA[it] != eB[it] && eLen[it].isFinite() && eLen[it] > 0f &&
+            eName[it] in 0 until nNames }) { "routing graph contains invalid edges" }
+        require(geomOff.first() == 0 && geomOff.last() == nP &&
+            (0 until geomOff.size - 1).all { geomOff[it] >= 0 &&
+                geomOff[it + 1] - geomOff[it] >= 2 }) { "routing graph geometry offsets are invalid" }
+        require(gLat.all { it in -90_000_000..90_000_000 } &&
+            gLon.all { it in -180_000_000..180_000_000 }) { "routing graph contains invalid geometry coordinates" }
+        require(gridOff.first() == 0 && gridOff.last() == nGrid &&
+            (0 until gridOff.size - 1).all { gridOff[it] >= 0 && gridOff[it + 1] >= gridOff[it] } &&
+            gridEdge.all { it in 0 until nM }) { "routing graph grid index is invalid" }
+        require(nameOff.first() == 0 && nameOff.last() == nameLen &&
+            (0 until nameOff.size - 1).all { nameOff[it] >= 0 && nameOff[it + 1] >= nameOff[it] }) {
+            "routing graph name index is invalid"
+        }
 
         val deg = IntArray(nN + 1)
         for (e in 0 until nM) { deg[eA[e] + 1]++; deg[eB[e] + 1]++ }
@@ -139,25 +200,55 @@ class RoadGraph(buf: ByteBuffer) {
         }
 
         const val M_LAT = 110574.0
+        const val SNAP_ALTERNATIVE_TOLERANCE_M = 40.0
         fun mLon(latDeg: Double) = 111320.0 * cos(Math.toRadians(latDeg))
     }
 
     // ------------------------------------------------------------------ edge helpers
-    private fun canGo(e: Int, dir: Int, p: Int) = (eFlags[e] shr (if (dir == 0) p else 3 + p)) and 1 == 1
+    private fun canGo(e: Int, dir: Int, p: Int): Boolean {
+        val accessProfile = if (p == Profile.HIKE) Profile.FOOT else p
+        return (eFlags[e] shr (if (dir == 0) accessProfile else 3 + accessProfile)) and 1 == 1
+    }
     private fun cls(e: Int) = (eFlags[e] shr 14) and 15
     private fun isRound(e: Int) = (eFlags[e] shr 18) and 1 == 1
     private fun isUnpaved(e: Int) = (eFlags[e] shr 19) and 1 == 1
+    private fun trackGrade(e: Int) = (eFlags[e] shr 20) and 7
+    private fun smoothness(e: Int) = (eFlags[e] shr 23) and 7
+    private fun isToll(e: Int) = ((eFlags[e] ushr 26) and 1) == 1
+    private fun isDifficult(e: Int) = trackGrade(e) >= 4 || smoothness(e) >= 4
+
+    private fun avoidancePenalty(e: Int, avoidance: Int): Double {
+        var factor = 1.0
+        if ((avoidance and RouteAvoidance.UNPAVED) != 0 && isUnpaved(e)) factor *= 2.8
+        if ((avoidance and RouteAvoidance.STEPS) != 0 && cls(e) == 9) factor *= 4.0
+        if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && isDifficult(e)) factor *= 3.0
+        if ((avoidance and RouteAvoidance.TOLLS) != 0 && isToll(e)) factor *= 3.0
+        return factor
+    }
 
     private fun speedMs(e: Int, p: Int): Double {
         val kmh = when (p) {
             Profile.CAR -> ((eFlags[e] shr 6) and 255).toDouble()
             Profile.FOOT -> when (cls(e)) { 9 -> 3.0; 7, 8 -> 4.2; else -> 5.0 }
+            Profile.HIKE -> when (cls(e)) {
+                9 -> 2.2
+                7, 8 -> 4.5
+                else -> 3.2
+            }
             else -> {
                 val v = when (cls(e)) { 8 -> 14.0; 7 -> 11.0; 0, 1 -> 14.0; 2 -> 15.0; 9 -> 4.0; else -> 17.0 }
                 if (isUnpaved(e)) v * 0.7 else v
             }
         }
         return max(1.0, kmh) / 3.6
+    }
+
+    /** Approximate speed for the straight connector between the requested point and the road graph. */
+    private fun connectorSpeedMs(p: Int) = when (p) {
+        Profile.CAR -> 36.0
+        Profile.FOOT -> 1.5
+        Profile.HIKE -> 1.2
+        else -> 8.0
     }
 
     fun nameOf(e: Int): String {
@@ -299,53 +390,97 @@ class RoadGraph(buf: ByteBuffer) {
     private class Leg(val e: Int, val dir: Int, val from: Int, val to: Int, var lenM: Double, var i0: Int = 0, var i1: Int = 0)
 
     @Synchronized
-    fun route(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int): RouteResult? {
+    fun route(
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double,
+        p: Int, preference: Int = RoutePreference.FASTEST, avoidance: Int = RouteAvoidance.NONE
+    ): RouteResult? {
+        if (p !in Profile.CAR..Profile.HIKE || preference !in RoutePreference.FASTEST..RoutePreference.SHORTEST ||
+            avoidance < 0 || (avoidance and RouteAvoidance.ALL.inv()) != 0) return null
+        if (!fromLat.isFinite() || !fromLon.isFinite() || !toLat.isFinite() || !toLon.isFinite()) return null
+        if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 ||
+            fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) return null
+        if (distM(fromLat, fromLon, toLat, toLon) < 0.5) return null
+
         val ss = snapK(fromLat, fromLon, p, 4)
         val ts = snapK(toLat, toLon, p, 4)
         if (ss.isEmpty() || ts.isEmpty()) return null
+
+        // Keep alternatives near the closest usable road. Without this bound, the
+        // router could silently jump from a disconnected road/path to a different
+        // component several hundred metres away using a fictitious straight connector.
+        val sLimit = ss.first().dist + SNAP_ALTERNATIVE_TOLERANCE_M
+        val tLimit = ts.first().dist + SNAP_ALTERNATIVE_TOLERANCE_M
+        val startCandidates = ss.filter { it.dist <= sLimit }
+        val endCandidates = ts.filter { it.dist <= tLimit }
+
         val pairs = ArrayList<Pair<Snap, Snap>>()
-        for (a in ss) for (b in ts) pairs.add(a to b)
-        pairs.sortBy { it.first.dist + it.second.dist }
-        for ((s, t) in pairs.take(8)) {
-            val r = search(fromLat, fromLon, toLat, toLon, p, s, t)
-            if (r != null) return r
+        for (a in startCandidates) for (b in endCandidates) pairs.add(a to b)
+        fun connectorCost(a: Snap, b: Snap) =
+            if (preference == RoutePreference.SHORTEST) a.dist + b.dist
+            else (a.dist + b.dist) / connectorSpeedMs(p)
+        pairs.sortBy { connectorCost(it.first, it.second) }
+
+        // Evaluate every candidate pair. The closest pair of roads is not necessarily
+        // connected, nor does it necessarily produce the fastest complete route.
+        // RouteResult.timeS includes an estimate for the straight off-road connectors.
+        var best: RouteResult? = null
+        var bestCost = Double.MAX_VALUE
+        for ((s, t) in pairs) {
+            // Connector cost alone is a lower bound for the selected optimization objective.
+            if (connectorCost(s, t) >= bestCost) continue
+            val candidate = search(fromLat, fromLon, toLat, toLon, p, preference, avoidance, s, t) ?: continue
+            val cost = candidate.preferenceCost
+            if (cost < bestCost) {
+                best = candidate
+                bestCost = cost
+            }
         }
-        return null
+        return best
     }
 
-    private fun search(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap): RouteResult? {
+    private fun search(
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double,
+        p: Int, preference: Int, avoidance: Int, s: Snap, t: Snap
+    ): RouteResult? {
         if (g.size != nN) { g = DoubleArray(nN); prev = IntArray(nN); closed = BooleanArray(nN) }
         java.util.Arrays.fill(g, Double.MAX_VALUE)
         java.util.Arrays.fill(prev, -2)
         java.util.Arrays.fill(closed, false)
 
-        val vmax = when (p) { Profile.CAR -> 36.0; Profile.FOOT -> 1.5; else -> 8.0 }
-        val tkx = mLon(toLat)
-        fun h(v: Int) = hypot((lo(v) - toLon) * tkx, (la(v) - toLat) * M_LAT) / vmax
+        val shortest = preference == RoutePreference.SHORTEST
+        val vmax = when (p) { Profile.CAR -> 130.0 / 3.6 + 1e-6; Profile.FOOT, Profile.HIKE -> 1.5; else -> 8.0 }
+        val graphMinLat = gridLat0.toDouble() / 1e6
+        val graphMaxLat = (gridLat0.toDouble() + rows.toDouble() * cell) / 1e6
+        val maxAbsLat = max(abs(toLat), max(abs(graphMinLat), abs(graphMaxLat)))
+        val tkx = mLon(maxAbsLat)
+        fun edgeCost(m: Double, edge: Int) =
+            (if (shortest) m else m / speedMs(edge, p)) * avoidancePenalty(edge, avoidance)
+        fun h(v: Int): Double {
+            val d = hypot((lo(v) - toLon) * tkx, (la(v) - toLat) * M_LAT)
+            return if (shortest) d else d / vmax
+        }
 
         val heap = Heap()
-        val sp = speedMs(s.e, p)
         if (canGo(s.e, 0, p)) {                       // leave through B
-            val v = eB[s.e]; val c = (s.geomLen - s.off) / sp
+            val v = eB[s.e]; val c = edgeCost(s.geomLen - s.off, s.e)
             if (c < g[v]) { g[v] = c; prev[v] = -1; heap.push(c + h(v), v) }
         }
         if (canGo(s.e, 1, p)) {                       // leave through A
-            val v = eA[s.e]; val c = s.off / sp
+            val v = eA[s.e]; val c = edgeCost(s.off, s.e)
             if (c < g[v]) { g[v] = c; prev[v] = -1; heap.push(c + h(v), v) }
         }
-        val tp = speedMs(t.e, p)
         val attachA = eA[t.e]
         val attachB = eB[t.e]
-        val extraA = if (canGo(t.e, 0, p)) t.off / tp else Double.MAX_VALUE            // A -> T moving forward
-        val extraB = if (canGo(t.e, 1, p)) (t.geomLen - t.off) / tp else Double.MAX_VALUE // B -> T moving backward
+        val extraA = if (canGo(t.e, 0, p)) edgeCost(t.off, t.e) else Double.MAX_VALUE            // A -> T moving forward
+        val extraB = if (canGo(t.e, 1, p)) edgeCost(t.geomLen - t.off, t.e) else Double.MAX_VALUE // B -> T moving backward
 
         var best = Double.MAX_VALUE
         var bestNode = -1
         var bestViaA = true
         var direct = false
         if (s.e == t.e) {
-            if (s.off <= t.off && canGo(s.e, 0, p)) { best = (t.off - s.off) / sp; direct = true }
-            else if (s.off >= t.off && canGo(s.e, 1, p)) { best = (s.off - t.off) / sp; direct = true }
+            if (s.off <= t.off && canGo(s.e, 0, p)) { best = edgeCost(t.off - s.off, s.e); direct = true }
+            else if (s.off >= t.off && canGo(s.e, 1, p)) { best = edgeCost(s.off - t.off, s.e); direct = true }
         }
 
         while (heap.size > 0) {
@@ -364,12 +499,12 @@ class RoadGraph(buf: ByteBuffer) {
                 if (!canGo(e, dir, p)) continue
                 val v = if (dir == 0) eB[e] else eA[e]
                 if (closed[v]) continue
-                val ng = gu + eLen[e] / speedMs(e, p)
+                val ng = gu + edgeCost(eLen[e].toDouble(), e)
                 if (ng < g[v]) { g[v] = ng; prev[v] = code; heap.push(ng + h(v), v) }
             }
         }
         if (best == Double.MAX_VALUE) return null
-        return build(fromLat, fromLon, toLat, toLon, p, s, t, direct, bestNode, bestViaA)
+        return build(fromLat, fromLon, toLat, toLon, p, s, t, direct, bestNode, bestViaA, best, avoidance)
     }
 
     // ------------------------------------------------------------------ result: geometry + instructions
@@ -390,7 +525,7 @@ class RoadGraph(buf: ByteBuffer) {
     }
 
     private fun build(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, p: Int, s: Snap, t: Snap,
-                      direct: Boolean, bestNode: Int, bestViaA: Boolean): RouteResult {
+                      direct: Boolean, bestNode: Int, bestViaA: Boolean, preferenceCost: Double, avoidance: Int): RouteResult {
         val pts = Pts()
         val legs = ArrayList<Leg>()
         pts.add(fromLat, fromLon)
@@ -448,9 +583,20 @@ class RoadGraph(buf: ByteBuffer) {
         for (i in 1 until pts.n) dist += distM(points[2 * i - 2], points[2 * i - 1], points[2 * i], points[2 * i + 1])
         var time = 0.0
         for (l in legs) time += l.lenM / speedMs(l.e, p)
+        time += (s.dist + t.dist) / connectorSpeedMs(p)
         legs.last().i1 = pts.n - 1
         val real = legs.filter { it.lenM >= 2.0 }
-        return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist), s.dist, t.dist)
+        val warnings = ArrayList<String>()
+        if ((avoidance and RouteAvoidance.UNPAVED) != 0 && real.any { isUnpaved(it.e) })
+            warnings.add("В маршруте остались грунтовые или неасфальтированные участки")
+        if ((avoidance and RouteAvoidance.STEPS) != 0 && real.any { cls(it.e) == 9 })
+            warnings.add("В маршруте остались лестницы")
+        if ((avoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0 && real.any { isDifficult(it.e) })
+            warnings.add("В маршруте остались тропы с низким качеством покрытия")
+        if ((avoidance and RouteAvoidance.TOLLS) != 0 && real.any { isToll(it.e) })
+            warnings.add("В маршруте остались платные дороги")
+        return RouteResult(points, dist, time, instructions(points, pts.n, if (real.isEmpty()) legs else real, p, dist),
+            s.dist, t.dist, preferenceCost, warnings)
     }
 
     private fun turnKind(turn: Double): Int {

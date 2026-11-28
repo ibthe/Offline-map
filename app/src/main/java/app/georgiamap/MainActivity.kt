@@ -61,6 +61,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -77,6 +78,13 @@ import java.util.TimeZone
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
+private object GpxTransferLock {
+    private val active = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun tryBegin(): Boolean = active.compareAndSet(false, true)
+    fun finish() { active.set(false) }
+    val isBusy: Boolean get() = active.get()
+}
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
@@ -86,9 +94,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etSearch: EditText
     private lateinit var lvResults: ListView
     private lateinit var prefs: SharedPreferences
+    private lateinit var mapPackage: MapPackage
     private lateinit var userDb: UserDb
 
     private var map: MapLibreMap? = null
+    private var hasSavedMapState = false
     private var style: Style? = null
     private var placeDb: PlaceDb? = null
     private var elevation: Elevation? = null
@@ -97,8 +107,25 @@ class MainActivity : AppCompatActivity() {
     private val ui = Handler(Looper.getMainLooper())
     private val errors = ArrayList<String>()
     private var searchResults: List<PlaceDb.Place> = emptyList()
+    private var searchGeneration = 0
+    private var searchTask: Runnable? = null
+    private var elevationKey = ""
+    private var elevationValue: Int? = null
+    private var elevationGeneration = 0
+    private var elevationTask: Runnable? = null
+    private var waypointRenderGeneration = 0
+    private var waypointLoadGeneration = 0
+    private var waypointViewportTask: Runnable? = null
+    private var trackRenderGeneration = 0
+    private var listLoadGeneration = 0
+    private var diagnosticsGeneration = 0
+    private var routeAnalysisGeneration = 0
+    private var routeAnalysisBusy = false
+    private var routeAnalysisResult: RouteAnalysis.Result? = null
+    private var safetyLookupGeneration = 0
 
     private var rulerOn = false
+    private var rulerAreaMode = false
     private val rulerPts = ArrayList<LatLng>()
     private var shownTrackId = -1L
 
@@ -108,8 +135,9 @@ class MainActivity : AppCompatActivity() {
     private var navDest: LatLng? = null
     private var navDestName = ""
     private var navProfile = Profile.CAR
+    private var routePreference = RoutePreference.FASTEST
+    private var routeAvoidance = RouteAvoidance.NONE
     @Volatile private var graph: RoadGraph? = null
-    private var graphLoading = false
     private var session: NavSession? = null
     private var routeFrom: LatLng? = null
     private var pendingFrom: LatLng? = null       // "route from here": the chosen place is the START
@@ -117,14 +145,31 @@ class MainActivity : AppCompatActivity() {
     private var offCount = 0
     private var lastReroute = 0L
     private var rerouting = false
+    private var routeRequestId = 0
     private val announced = HashSet<String>()
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
     private lateinit var compass: CompassController
     private var myLoc: Location? = null
+    private var waypointCache: List<UserDb.Wpt> = emptyList()
+    private var lastNavFixAt = 0L
+    private var navGpsLost = false
+    private val navWatchdog = object : Runnable {
+        override fun run() {
+            if (navMode != NavMode.ACTIVE) return
+            val now = System.currentTimeMillis()
+            if (lastNavFixAt > 0L && now - lastNavFixAt > 15_000L && !navGpsLost) {
+                navGpsLost = true
+                findViewById<TextView>(R.id.navText).text = "Нет сигнала GPS. Ожидаю восстановления…"
+                speak("Нет сигнала GPS. Ожидаю восстановления")
+            }
+            ui.postDelayed(this, 2_000L)
+        }
+    }
     private var following = false
     private var locActive = false
+    private var locationRequestedByUser = false
     private var pendingAfterPerm: (() -> Unit)? = null
 
     private val permLauncher =
@@ -146,9 +191,14 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) readGpx(uri)
         }
 
+    private val mapPackageImportLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importMapPackage(uri)
+        }
+
     // ============================================================ lifecycle
 
-    /** Five colour themes. Each one has a UI overlay (res/values/palettes.xml) and its own map style file. */
+    /** Seven colour themes. Each one has a UI overlay (res/values/palettes.xml) and its own map style file. */
     private enum class Palette(val key: String, val title: String, val hint: String, val styleRes: Int, val swatch: Int, val swatch2: Int) {
         OCEAN("ocean", "Океан", "спокойствие и ясность", R.style.ThemeOverlay_Georgia_Ocean, 0xFF2A7FA8.toInt(), 0xFF3FA6A0.toInt()),
         FOREST("forest", "Лес", "естественный покой", R.style.ThemeOverlay_Georgia_Forest, 0xFF3F7D58.toInt(), 0xFF7BA05B.toInt()),
@@ -216,6 +266,7 @@ class MainActivity : AppCompatActivity() {
     private fun isNight(): Boolean = nightFor(themeMode())
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        hasSavedMapState = savedInstanceState != null
         applyThemeMode(themeMode())
         super.onCreate(savedInstanceState)
         theme.applyStyle(palette().styleRes, true)   // colour theme, before any view is inflated
@@ -225,11 +276,27 @@ class MainActivity : AppCompatActivity() {
         setupEdgeToEdge()
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (prefs.getBoolean("reset_map_camera", false)) {
+            hasSavedMapState = false
+            prefs.edit().remove("reset_map_camera").apply()
+        }
+        mapPackage = MapPackages.resolve(prefs.getString("map_package_id", MapPackages.DEFAULT_ID) ?: MapPackages.DEFAULT_ID, filesDir)
+        locationRequestedByUser = prefs.getBoolean("location_user_enabled", false)
+        following = prefs.getBoolean("location_follow", locationRequestedByUser)
+        locActive = locationRequestedByUser
+        rulerOn = prefs.getBoolean("ruler_on", false)
+        rulerAreaMode = prefs.getBoolean("ruler_area_mode", false)
+        shownTrackId = prefs.getLong("shown_track", -1L)
+        rulerAreaMode = savedInstanceState?.getBoolean("ruler_area_mode") ?: rulerAreaMode
+        savedInstanceState?.getDoubleArray("ruler_points")?.let { points ->
+            if (points.size % 2 == 0) for (i in points.indices step 2) rulerPts.add(LatLng(points[i], points[i + 1]))
+        }
         userDb = UserDb(this)
         loading = findViewById(R.id.loading)
         loadingText = findViewById(R.id.loadingText)
         tvInfo = findViewById(R.id.tvInfo)
         etSearch = findViewById(R.id.etSearch)
+        val restoredSearch = savedInstanceState?.getString("search_query").orEmpty()
         lvResults = findViewById(R.id.lvResults)
         mapView = findViewById(R.id.mapView)
         mapView.onCreate(savedInstanceState)
@@ -240,9 +307,35 @@ class MainActivity : AppCompatActivity() {
             val c = map?.cameraPosition?.target
             if (c != null) addWaypointDialog(c)
         }
-        findViewById<View>(R.id.btnLocation).setOnClickListener { withLocationPermission { startLocation(true) } }
+        findViewById<View>(R.id.btnLocation).setOnClickListener {
+            if (navMode == NavMode.ACTIVE) {
+                following = true
+                prefs.edit().putBoolean("location_follow", true).apply()
+                myLoc?.let { map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), maxOf(map?.cameraPosition?.zoom ?: 14.0, 14.0)), 500) }
+                refreshLocationButton()
+            } else if (locationRequestedByUser) {
+                locationRequestedByUser = false
+                following = false
+                prefs.edit().putBoolean("location_user_enabled", false).putBoolean("location_follow", false).apply()
+                locActive = false
+                stopLocationUpdates()
+                myLoc = null
+                refreshMe()
+                updateInfo()
+                refreshLocationButton()
+            } else {
+                withLocationPermission { startLocation(true) }
+            }
+        }
         findViewById<View>(R.id.btnFit).setOnClickListener {
-            map?.easeCamera(CameraUpdateFactory.newLatLngBounds(GEORGIA, 48), 700)
+            following = false
+            prefs.edit().putBoolean("location_follow", false).apply()
+            findViewById<View>(R.id.root).post {
+                try {
+                    val p = mapViewportPadding()
+                    map?.easeCamera(CameraUpdateFactory.newLatLngBounds(mapPackage.bounds.toLatLngBounds(), p[0], p[1], p[2], p[3]), 700)
+                } catch (_: Exception) { }
+            }
         }
         tvInfo.setOnClickListener {
             val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
@@ -251,7 +344,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupChips()
-        navProfile = prefs.getInt("nav_profile", Profile.CAR)
+        navProfile = prefs.getInt("nav_profile", Profile.CAR).coerceIn(Profile.CAR, Profile.HIKE)
+        routePreference = prefs.getInt("route_preference", RoutePreference.FASTEST).coerceIn(RoutePreference.FASTEST, RoutePreference.SHORTEST)
+        routeAvoidance = prefs.getInt("route_avoidance", RouteAvoidance.NONE) and RouteAvoidance.ALL
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
         refreshRecButton()
         findViewById<View>(R.id.btnRouteTo).setOnClickListener {
@@ -267,10 +362,26 @@ class MainActivity : AppCompatActivity() {
                 return CompassController.Origin(c.latitude, c.longitude, 0.0, "центр карты (GPS нет)")
             }
             override fun mapCenter() = map?.cameraPosition?.target?.let { CompassController.Target("Центр карты", it.latitude, it.longitude) }
-            override fun searchPlaces(q: String): List<CompassController.Target> = placeDb?.search(q, 20)?.map { p ->
-                CompassController.Target(listOf(p.ru, p.en, p.ka).firstOrNull { it.isNotEmpty() } ?: q, p.lat, p.lon)
-            } ?: emptyList()
-            override fun waypoints() = userDb.waypoints().map { CompassController.Target(it.name, it.lat, it.lon) }
+            override fun searchPlaces(q: String, callback: (List<CompassController.Target>) -> Unit) {
+                val db = placeDb
+                if (db == null) { callback(emptyList()); return }
+                thread(name = "compass-search") {
+                    val result = try {
+                        db.search(q, 20).map { p ->
+                            CompassController.Target(listOf(p.ru, p.en, p.ka).firstOrNull { it.isNotEmpty() } ?: q, p.lat, p.lon)
+                        }
+                    } catch (_: Exception) { emptyList() }
+                    runOnUiThread { if (!isFinishing && !isDestroyed) callback(result) }
+                }
+            }
+            override fun waypoints(callback: (List<CompassController.Target>) -> Unit) {
+                thread(name = "compass-waypoints") {
+                    val result = try {
+                        userDb.waypoints().map { CompassController.Target(it.name, it.lat, it.lon) }
+                    } catch (_: Exception) { emptyList() }
+                    runOnUiThread { if (!isFinishing && !isDestroyed) callback(result) }
+                }
+            }
             override fun navTarget() = navDest?.let { CompassController.Target(navDestName.ifBlank { "Цель" }, it.latitude, it.longitude) }
             override fun setMapBearing(deg: Double) {
                 if (navMode == NavMode.ACTIVE) return
@@ -289,10 +400,28 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.navProfCar).setOnClickListener { chooseProfile(Profile.CAR) }
         findViewById<View>(R.id.navProfFoot).setOnClickListener { chooseProfile(Profile.FOOT) }
+        findViewById<View>(R.id.navProfHike).setOnClickListener { chooseProfile(Profile.HIKE) }
         findViewById<View>(R.id.navProfBike).setOnClickListener { chooseProfile(Profile.BIKE) }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (navMode != NavMode.IDLE) stopNav() else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+                when {
+                    navMode != NavMode.IDLE -> stopNav()
+                    lvResults.visibility == View.VISIBLE || etSearch.text?.isNotEmpty() == true -> {
+                        etSearch.setText("")
+                        etSearch.clearFocus()
+                        showResults(false)
+                    }
+                    rulerOn -> {
+                        rulerOn = false
+                        prefs.edit().putBoolean("ruler_on", false).apply()
+                        rulerPts.clear()
+                        refreshRuler()
+                    }
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
             }
         })
 
@@ -310,16 +439,16 @@ class MainActivity : AppCompatActivity() {
             val p = searchResults.getOrNull(pos) ?: return@setOnItemClickListener
             showSearchResult(p)
         }
-
         prepareData {
             val dir = filesDir
-            tilesFile = File(dir, "georgia.mbtiles")
-            File(dir, "places.db").takeIf { it.exists() }?.let {
+            tilesFile = mapPackage.file(dir, mapPackage.tilesAsset)
+            mapPackage.placesAsset?.let { mapPackage.file(dir, it) }?.takeIf { it.exists() }?.let {
                 placeDb = try { PlaceDb(it.absolutePath) } catch (e: Exception) { errors.add("places: $e"); null }
             }
-            File(dir, "relief.mbtiles").takeIf { it.exists() }?.let {
+            mapPackage.reliefAsset?.let { mapPackage.file(dir, it) }?.takeIf { it.exists() }?.let {
                 elevation = try { Elevation(it.absolutePath) } catch (e: Exception) { errors.add("relief: $e"); null }
             }
+            if (restoredSearch.isNotEmpty()) etSearch.setText(restoredSearch)
             mapView.getMapAsync { setupMap(it) }
         }
     }
@@ -331,13 +460,47 @@ class MainActivity : AppCompatActivity() {
         ui.post { if (what == "appearance") showAppearanceDialog() }
     }
 
-    override fun onStart() { super.onStart(); reopenPending(); refreshRecButton(); mapView.onStart(); compass.onStart(); if (locActive) startLocation(false) }
-    override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick() }
-    override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
-    override fun onStop() { stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        resizeSearchResults()
+        showResults(lvResults.visibility == View.VISIBLE)
+        findViewById<View>(R.id.root).post {
+            updateControlsMargin()
+            applyMapUiMargins()
+        }
+    }
+
+    override fun onStart() { super.onStart(); reopenPending(); refreshRecButton(); refreshLocationButton(); mapView.onStart(); compass.onStart(); if (locActive) startLocation(false) }
+    override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick(); if (navMode == NavMode.ACTIVE && !navGpsLost) lastNavFixAt = System.currentTimeMillis(); startNavWatchdog() }
+    override fun onPause() { stopNavWatchdog(); mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
+    override fun onStop() { stopNavWatchdog(); stopLocationUpdates(); compass.onStop(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
-    override fun onDestroy() { tts?.shutdown(); mapView.onDestroy(); super.onDestroy() }
+    override fun onDestroy() {
+        stopNavWatchdog()
+        routeRequestId++
+        searchGeneration++
+        elevationGeneration++
+        waypointRenderGeneration++
+        waypointLoadGeneration++
+        trackRenderGeneration++
+        listLoadGeneration++
+        diagnosticsGeneration++
+        routeAnalysisGeneration++
+        safetyLookupGeneration++
+        waypointViewportTask?.let { ui.removeCallbacks(it) }
+        waypointViewportTask = null
+        searchTask?.let { ui.removeCallbacks(it) }
+        elevationTask?.let { ui.removeCallbacks(it) }
+        tts?.shutdown()
+        try { placeDb?.close() } catch (_: Exception) { }
+        try { elevation?.close() } catch (_: Exception) { }
+        mapView.onDestroy()
+        super.onDestroy()
+    }
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("search_query", etSearch.text?.toString() ?: "")
+        outState.putDoubleArray("ruler_points", rulerPts.flatMap { listOf(it.latitude, it.longitude) }.toDoubleArray())
+        outState.putBoolean("ruler_area_mode", rulerAreaMode)
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
     }
@@ -367,51 +530,140 @@ class MainActivity : AppCompatActivity() {
             applyMapUiMargins()
             insets
         }
-        findViewById<View>(R.id.navBar).addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateControlsMargin() }
+        // MapLibre's own compass/attribution controls must move with the actual
+        // floating panels, including expanded search results and navigation mode.
+        listOf(R.id.topPanel, R.id.navBanner, R.id.bottomDock, R.id.navBar).forEach { id ->
+            findViewById<View>(id).addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                updateControlsMargin()
+                applyMapUiMargins()
+            }
+        }
         ViewCompat.requestApplyInsets(root)
     }
 
     /** The control capsule sits 16 dp above whatever panel is at the bottom (dock or navigator bar). */
     private fun updateControlsMargin() {
-        val c = findViewById<View>(R.id.controls)
-        val nb = findViewById<View>(R.id.navBar)
-        val lp = c.layoutParams as FrameLayout.LayoutParams
-        val panel = if (nb.visibility == View.VISIBLE) maxOf(nb.height, dp(64f)) else dp(64f)
-        val want = insetBottom + dp(16f) + panel + dp(16f)
-        if (lp.bottomMargin != want) { lp.bottomMargin = want; c.layoutParams = lp }
+        val controls = findViewById<View>(R.id.controls)
+        val lp = controls.layoutParams as FrameLayout.LayoutParams
+        if (resources.configuration.screenHeightDp < 500) {
+            val topPanel = findViewById<View>(R.id.topPanel)
+            val navBanner = findViewById<View>(R.id.navBanner)
+            val panel = if (navBanner.visibility == View.VISIBLE) navBanner else topPanel
+            val wantTop = insetTop + dp(16f) + panel.height + dp(16f)
+            val wantGravity = android.view.Gravity.END or android.view.Gravity.TOP
+            if (lp.gravity != wantGravity || lp.topMargin != wantTop || lp.bottomMargin != 0) {
+                lp.gravity = wantGravity
+                lp.topMargin = wantTop
+                lp.bottomMargin = 0
+                controls.layoutParams = lp
+            }
+        } else {
+            val navBar = findViewById<View>(R.id.navBar)
+            val panelHeight = if (navBar.visibility == View.VISIBLE) maxOf(navBar.height, dp(64f)) else dp(64f)
+            val wantBottom = insetBottom + dp(16f) + panelHeight + dp(16f)
+            val wantGravity = android.view.Gravity.END or android.view.Gravity.BOTTOM
+            if (lp.gravity != wantGravity || lp.topMargin != 0 || lp.bottomMargin != wantBottom) {
+                lp.gravity = wantGravity
+                lp.topMargin = 0
+                lp.bottomMargin = wantBottom
+                controls.layoutParams = lp
+            }
+        }
     }
 
-    /** Keeps the MapLibre logo, attribution and compass out from under the floating panels. */
+    /** Keep MapLibre's built-in controls clear of the panels in every screen state. */
     private fun applyMapUiMargins() {
+        val topPanel = findViewById<View>(R.id.topPanel)
+        val navBanner = findViewById<View>(R.id.navBanner)
+        val topHeight = listOf(topPanel, navBanner)
+            .filter { it.visibility == View.VISIBLE }
+            .maxOfOrNull { it.height } ?: 0
+        val topMargin = insetTop + dp(16f) + topHeight + dp(8f)
+
+        val navBar = findViewById<View>(R.id.navBar)
+        val bottomPanel = if (navBar.visibility == View.VISIBLE) navBar else findViewById(R.id.bottomDock)
+        val bottomMargin = insetBottom + dp(16f) + bottomPanel.height + dp(16f)
+
         val ui = map?.uiSettings ?: return
-        val bottom = dp(96f) + insetBottom           // dock margin 16 + dock 64 + gap 16 (the MapLibre logo is switched off)
-        ui.setAttributionMargins(dp(16f), 0, 0, bottom)
-        ui.setCompassMargins(0, dp(16f + 56f + 8f + 40f + 8f + 48f + 8f) + insetTop, dp(16f), 0)   // under search + chips + info chip
+        ui.setCompassEnabled(resources.configuration.screenHeightDp >= 500)
+        ui.setAttributionMargins(dp(16f), 0, 0, bottomMargin)
+        ui.setCompassMargins(0, topMargin, dp(16f), 0)
     }
 
     // ============================================================ data (assets -> files)
 
     private fun prepareData(onReady: () -> Unit) {
-        val have = assets.list("")?.toSet() ?: emptySet()
-        if ("georgia.mbtiles" !in have) {
-            loading.visibility = View.VISIBLE
-            loadingText.text = "В APK нет georgia.mbtiles — сборка карты не выполнилась"
+        if (mapPackage.directory != null) {
+            if (!MapPackageInstaller.validateInstalled(mapPackage, filesDir)) {
+                loading.visibility = View.VISIBLE
+                loadingText.text = "Пакет «${mapPackage.title}» повреждён или содержит неполные данные"
+                return
+            }
+            loading.visibility = View.GONE
+            onReady()
             return
         }
-        val todo = DATA_FILES.filter { it in have }
-        for (n in DATA_FILES) if (n !in have) File(filesDir, n).delete()
-        val version = BuildConfig.VERSION_CODE
-        val ready = todo.all { File(filesDir, it).exists() } && prefs.getInt("data_version", -1) == version
-        if (ready) { onReady(); return }
+        val have = assets.list("")?.toSet() ?: emptySet()
+        if (mapPackage.tilesAsset !in have) {
+            loading.visibility = View.VISIBLE
+            loadingText.text = "В APK нет ${mapPackage.tilesAsset} — сборка пакета карты не выполнилась"
+            return
+        }
+
+        val versions = try {
+            assets.open("map-data-manifest.txt").bufferedReader(Charsets.UTF_8).useLines { lines ->
+                lines.mapNotNull { line ->
+                    val split = line.split("=", limit = 2)
+                    if (split.size == 2 && split[0].isNotBlank() && split[1].isNotBlank())
+                        split[0] to split[1] else null
+                }.toMap()
+            }
+        } catch (_: Exception) { emptyMap() }
+
+        fun assetVersion(name: String) = versions[name] ?: BuildConfig.MAP_DATA_VERSION
+        fun assetLength(name: String) = assets.openFd(name).use { it.length }
+
+        val removed = mapPackage.assetFiles.filter { it !in have }
+        for (name in removed) {
+            File(filesDir, name).delete()
+            prefs.edit().remove("asset_version_$name").apply()
+        }
+
+        val todo = mapPackage.assetFiles.filter { name ->
+            if (name !in have) false
+            else {
+                val target = File(filesDir, name)
+                !target.isFile || target.length() != assetLength(name) ||
+                    prefs.getString("asset_version_$name", "") != assetVersion(name)
+            }
+        }
+        if (todo.isEmpty()) { onReady(); return }
 
         loading.visibility = View.VISIBLE
         thread(name = "data-copy") {
             try {
-                for (name in todo) copyAsset(name)
-                prefs.edit().putInt("data_version", version).apply()
-                runOnUiThread { loading.visibility = View.GONE; onReady() }
+                for (name in todo) {
+                    try {
+                        copyAsset(name)
+                        prefs.edit().putString("asset_version_$name", assetVersion(name)).apply()
+                    } catch (e: Exception) {
+                        File(filesDir, "$name.tmp").delete()
+                        File(filesDir, name).delete()
+                        prefs.edit().remove("asset_version_$name").apply()
+                        if (name == mapPackage.tilesAsset) throw e
+                        errors.add("$name: $e")
+                    }
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        onReady()
+                    }
+                }
             } catch (e: Exception) {
-                runOnUiThread { loadingText.text = "Ошибка: ${e.message}" }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) loadingText.text = "Ошибка карты: ${e.message}"
+                }
             }
         }
     }
@@ -430,16 +682,25 @@ class MainActivity : AppCompatActivity() {
                     out.write(buf, 0, n)
                     copied += n
                     val mb = copied shr 20
-                    if (mb != last) {
-                        last = mb
+                    val bucket = mb / 8
+                    if (bucket != last) {
+                        last = bucket
                         val t = if (total > 0) "$mb / ${total shr 20} МБ" else "$mb МБ"
-                        runOnUiThread { loadingText.text = getString(R.string.loading) + "\n$name: $t" }
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed)
+                                loadingText.text = getString(R.string.loading) + "\n$name: $t"
+                        }
                     }
                 }
             }
         }
+        val copied = tmp.length()
+        if (total > 0 && copied != total) {
+            tmp.delete()
+            error("неполное копирование $name: $copied из $total байт")
+        }
         val target = File(filesDir, name)
-        if (target.exists()) target.delete()
+        if (target.exists() && !target.delete()) error("cannot replace: $name")
         if (!tmp.renameTo(target)) error("rename failed: $name")
     }
 
@@ -451,24 +712,58 @@ class MainActivity : AppCompatActivity() {
         applyMapUiMargins()
         m.setMinZoomPreference(4.0)
         m.setMaxZoomPreference(18.0)
-        m.moveCamera(
-            CameraUpdateFactory.newCameraPosition(
-                CameraPosition.Builder().target(LatLng(42.2, 43.5)).zoom(6.6).build()
-            )
-        )
-        m.addOnCameraIdleListener { updateInfo() }
+        if (!hasSavedMapState) {
+            if (mapPackage.id == MapPackages.DEFAULT_ID) {
+                m.moveCamera(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder().target(LatLng(42.2, 43.5)).zoom(6.6).build()
+                    )
+                )
+            } else {
+                // A saved camera from the previous region can be outside the newly selected map.
+                // Fit the selected package on first launch and after an explicit region switch.
+                findViewById<View>(R.id.root).post {
+                    if (isFinishing || isDestroyed || map !== m || (following && myLoc != null)) return@post
+                    try {
+                        val p = mapViewportPadding()
+                        m.moveCamera(CameraUpdateFactory.newLatLngBounds(
+                            mapPackage.bounds.toLatLngBounds(), p[0], p[1], p[2], p[3]
+                        ))
+                    } catch (_: Exception) {
+                        m.moveCamera(CameraUpdateFactory.newLatLngZoom(
+                            LatLng(mapPackage.bounds.centerLat, mapPackage.bounds.centerLon), 5.5
+                        ))
+                    }
+                }
+            }
+        }
+        if (following) myLoc?.let {
+            m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), maxOf(m.cameraPosition.zoom, 14.0)))
+        }
+        m.addOnCameraIdleListener { updateInfo(); scheduleWaypointViewportRender() }
         m.addOnCameraMoveStartedListener { reason ->
-            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) following = false
+            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                following = false
+                prefs.edit().putBoolean("location_follow", false).apply()
+            }
         }
         m.addOnMapLongClickListener { ll ->
+            val activeNavigation = navMode == NavMode.ACTIVE
+            val items = if (activeNavigation) arrayOf("Сохранить точку")
+                else arrayOf("Маршрут сюда", "Сохранить точку")
             MaterialAlertDialogBuilder(this).setTitle(Geo.fmtCoord(ll.latitude, ll.longitude))
-                .setItems(arrayOf("Маршрут сюда", "Сохранить точку")) { _, i ->
-                    if (i == 0) setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude)) else addWaypointDialog(ll)
+                .setItems(items) { _, i ->
+                    if (!activeNavigation && i == 0) setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude))
+                    else addWaypointDialog(ll)
                 }.show()
             true
         }
         m.addOnMapClickListener { ll ->
-            if (rulerOn) { rulerPts.add(ll); refreshRuler(); true }
+            if (rulerOn && navMode == NavMode.IDLE) {
+                if (rulerPts.size >= 2_000) toast("Достигнут предел в 2 000 точек измерения")
+                else { rulerPts.add(ll); refreshRuler() }
+                true
+            }
             else {
                 val w = if (navMode == NavMode.ACTIVE) null else nearestWaypoint(m, ll)
                 if (w != null) { pendingFrom = null; setDestination(LatLng(w.lat, w.lon), w.name); true } else false
@@ -481,16 +776,16 @@ class MainActivity : AppCompatActivity() {
         val m = map ?: return
         val tiles = tilesFile ?: return
         val name = "style_${palette().key}" + (if (isNight()) "_dark" else "") + ".json"
-        val relief = File(filesDir, "relief.mbtiles")
-        val contours = File(filesDir, "contours.mbtiles")
+        val relief = mapPackage.reliefAsset?.let { mapPackage.file(filesDir, it) }
+        val contours = mapPackage.contoursAsset?.let { mapPackage.file(filesDir, it) }
         val obj = JSONObject(assets.open(name).bufferedReader().use { it.readText() })
         // optional data: without the file its source and layers are dropped, so the style still loads
-        if (!relief.exists()) dropFromStyle(obj, listOf("relief")) { it == "relief-hillshade" }
-        if (!contours.exists()) dropFromStyle(obj, listOf("contours", "contours-labels")) { it.startsWith("contour-") }
+        if (relief?.exists() != true) dropFromStyle(obj, listOf("relief")) { it == "relief-hillshade" }
+        if (contours?.exists() != true) dropFromStyle(obj, listOf("contours", "contours-labels")) { it.startsWith("contour-") }
         val json = obj.toString()
             .replace("__MBTILES_URL__", "mbtiles://" + tiles.absolutePath)
-            .replace("__RELIEF_URL__", "mbtiles://" + relief.absolutePath)
-            .replace("__CONTOURS_URL__", "mbtiles://" + contours.absolutePath)
+            .replace("__RELIEF_URL__", relief?.let { "mbtiles://" + it.absolutePath } ?: "")
+            .replace("__CONTOURS_URL__", contours?.let { "mbtiles://" + it.absolutePath } ?: "")
         val builder = Style.Builder().fromJson(json)
         for ((id, bmp) in markImages()) builder.withImage(id, bmp)
         m.setStyle(builder) { s ->
@@ -691,9 +986,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The search list and the chips share the same place under the search pill. */
+    private fun resizeSearchResults() {
+        val count = searchResults.size
+        if (count == 0) return
+        val dp = resources.displayMetrics.density
+        val maxResultsDp = minOf(280, (resources.configuration.screenHeightDp - 240).coerceAtLeast(80))
+        lvResults.layoutParams = lvResults.layoutParams.apply {
+            height = minOf((count * 64 * dp).roundToInt(), (maxResultsDp * dp).roundToInt())
+        }
+    }
+
     private fun showResults(show: Boolean) {
         lvResults.visibility = if (show) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.chipsScroll).visibility = if (show) View.GONE else View.VISIBLE
+        val showFilters = navMode == NavMode.IDLE && !show
+        findViewById<View>(R.id.chipsScroll).visibility = if (showFilters) View.VISIBLE else View.GONE
+        tvInfo.visibility = if (showFilters && resources.configuration.screenHeightDp >= 500) View.VISIBLE else View.GONE
+        updateFloatingControls()
     }
 
     // ============================================================ overlays (points, tracks, ruler, me)
@@ -707,6 +1015,10 @@ class MainActivity : AppCompatActivity() {
         s.addSource(GeoJsonSource("ovl-track"))
         s.addLayer(LineLayer("ovl-track-l", "ovl-track").withProperties(
             PropertyFactory.lineColor("#1565c0"), PropertyFactory.lineWidth(4f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        s.addSource(GeoJsonSource("ovl-rec-track"))
+        s.addLayer(LineLayer("ovl-rec-track-l", "ovl-rec-track").withProperties(
+            PropertyFactory.lineColor("#e53935"), PropertyFactory.lineWidth(4f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
 
         s.addSource(GeoJsonSource("ovl-route"))
@@ -728,6 +1040,9 @@ class MainActivity : AppCompatActivity() {
             PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(themeHex(R.attr.gmCrosshair)),
             PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
 
+        s.addSource(GeoJsonSource("ovl-ruler-area"))
+        s.addLayer(FillLayer("ovl-ruler-area-fill", "ovl-ruler-area").withProperties(
+            PropertyFactory.fillColor("#e65100"), PropertyFactory.fillOpacity(0.18f)))
         s.addSource(GeoJsonSource("ovl-ruler"))
         s.addLayer(LineLayer("ovl-ruler-l", "ovl-ruler").withProperties(
             PropertyFactory.lineColor("#e65100"), PropertyFactory.lineWidth(3f),
@@ -760,15 +1075,32 @@ class MainActivity : AppCompatActivity() {
     /** The saved point under the finger (within ~36 dp on screen), if any. */
     private fun nearestWaypoint(m: MapLibreMap, ll: LatLng): UserDb.Wpt? {
         val tap = m.projection.toScreenLocation(ll)
+        val radius = dp(36f).toFloat()
+        var latRadius = 90.0
+        var lonRadius = 180.0
+        try {
+            val corners = listOf(
+                android.graphics.PointF(tap.x - radius, tap.y - radius),
+                android.graphics.PointF(tap.x + radius, tap.y - radius),
+                android.graphics.PointF(tap.x + radius, tap.y + radius),
+                android.graphics.PointF(tap.x - radius, tap.y + radius)
+            ).map { m.projection.fromScreenLocation(it) }.filterNotNull()
+            latRadius = corners.maxOf { kotlin.math.abs(it.latitude - ll.latitude) }
+            lonRadius = corners.maxOf { kotlin.math.abs(normalizeLonDelta(it.longitude - ll.longitude)) }
+        } catch (_: Exception) { }
         var best: UserDb.Wpt? = null
-        var bestD = dp(36f).toFloat()
-        for (w in userDb.waypoints()) {
+        var bestD = radius
+        for (w in waypointCache) {
+            if (kotlin.math.abs(w.lat - ll.latitude) > latRadius ||
+                kotlin.math.abs(normalizeLonDelta(w.lon - ll.longitude)) > lonRadius) continue
             val q = m.projection.toScreenLocation(LatLng(w.lat, w.lon))
             val d = Math.hypot((q.x - tap.x).toDouble(), (q.y - tap.y).toDouble()).toFloat()
             if (d < bestD) { bestD = d; best = w }
         }
         return best
     }
+
+    private fun normalizeLonDelta(delta: Double): Double = ((delta + 540.0) % 360.0) - 180.0
 
     private fun themeColorInt(attr: Int): Int {
         val tv = TypedValue()
@@ -781,19 +1113,103 @@ class MainActivity : AppCompatActivity() {
     private fun src(id: String): GeoJsonSource? = style?.getSourceAs<GeoJsonSource>(id)
 
     private fun refreshWaypoints() {
-        val w = userDb.waypoints()
-        src("ovl-wpt")?.setGeoJson(Geo.pointFc(w.map { LatLng(it.lat, it.lon) }, w.map { it.name }))
+        val generation = ++waypointLoadGeneration
+        thread(name = "waypoint-cache-load") {
+            val points = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                if (generation == waypointLoadGeneration && !isFinishing && !isDestroyed) {
+                    waypointCache = points
+                    scheduleWaypointViewportRender()
+                }
+            }
+        }
+    }
+
+    /** Debounced viewport rendering keeps large waypoint collections off the UI thread and out of one giant GeoJSON source. */
+    private fun scheduleWaypointViewportRender() {
+        waypointViewportTask?.let { ui.removeCallbacks(it) }
+        val task = Runnable {
+            waypointViewportTask = null
+            renderWaypointsForViewport()
+        }
+        waypointViewportTask = task
+        ui.postDelayed(task, 140L)
+    }
+
+    private fun renderWaypointsForViewport() {
+        val m = map ?: return
+        if (mapView.width <= 0 || mapView.height <= 0 || style == null) return
+        val center = m.cameraPosition.target ?: return
+        val corners: List<LatLng> = try {
+            listOf(
+                android.graphics.PointF(0f, 0f),
+                android.graphics.PointF(mapView.width.toFloat(), 0f),
+                android.graphics.PointF(mapView.width.toFloat(), mapView.height.toFloat()),
+                android.graphics.PointF(0f, mapView.height.toFloat())
+            ).map { m.projection.fromScreenLocation(it) }.filterNotNull()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val minLat = corners.minOfOrNull { it.latitude } ?: -90.0
+        val maxLat = corners.maxOfOrNull { it.latitude } ?: 90.0
+        val maxLonDelta = corners.maxOfOrNull {
+            kotlin.math.abs(normalizeLonDelta(it.longitude - center.longitude))
+        } ?: 180.0
+        val snapshot = waypointCache
+        val generation = ++waypointRenderGeneration
+        thread(name = "waypoint-viewport-render") {
+            val visible = snapshot.filter { point ->
+                point.lat in minLat..maxLat &&
+                    kotlin.math.abs(normalizeLonDelta(point.lon - center.longitude)) <= maxLonDelta
+            }
+            val display = if (visible.size > 5_000) {
+                val cosLat = kotlin.math.cos(Math.toRadians(center.latitude))
+                visible.sortedBy { point ->
+                    val dx = normalizeLonDelta(point.lon - center.longitude) * 111_320.0 * cosLat
+                    val dy = (point.lat - center.latitude) * 110_574.0
+                    dx * dx + dy * dy
+                }.take(5_000)
+            } else visible
+            val geo = Geo.pointFc(display.map { LatLng(it.lat, it.lon) }, display.map { it.name })
+            runOnUiThread {
+                if (generation == waypointRenderGeneration && !isFinishing && !isDestroyed) {
+                    src("ovl-wpt")?.setGeoJson(geo)
+                }
+            }
+        }
     }
 
     private fun refreshTrack() {
-        val id = if (TrackService.running) prefs.getLong("rec_track", 0L) else shownTrackId
-        val pts = if (id > 0) userDb.trackLatLng(id) else emptyList()
-        src("ovl-track")?.setGeoJson(Geo.lineFc(pts))
+        val recordingId = if (TrackService.running) prefs.getLong("rec_track", 0L) else 0L
+        val selectedId = shownTrackId.takeIf { it > 0L && it != recordingId } ?: 0L
+        val generation = ++trackRenderGeneration
+        thread(name = "track-render") {
+            fun lines(id: Long) = if (id > 0L) userDb.trackSegments(id).map { segment ->
+                TrackGeometry.simplify(
+                    segment.map { TrackGeometry.Point(it.lat, it.lon) },
+                    toleranceMeters = 5.0
+                ).map { LatLng(it.lat, it.lon) }
+            } else emptyList()
+            val selected = try { lines(selectedId) } catch (_: Exception) { emptyList() }
+            val recording = try { lines(recordingId) } catch (_: Exception) { emptyList() }
+            val selectedGeo = Geo.linesFc(selected)
+            val recordingGeo = Geo.linesFc(recording)
+            runOnUiThread {
+                if (generation == trackRenderGeneration && !isFinishing && !isDestroyed) {
+                    src("ovl-track")?.setGeoJson(selectedGeo)
+                    src("ovl-rec-track")?.setGeoJson(recordingGeo)
+                }
+            }
+        }
     }
 
     private fun refreshRuler() {
-        src("ovl-ruler")?.setGeoJson(Geo.lineFc(rulerPts))
-        src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(rulerPts))
+        val visible = rulerOn && navMode == NavMode.IDLE
+        val points = if (visible) rulerPts else emptyList()
+        val outline = if (visible && rulerAreaMode && points.size >= 3) points + points.first() else points
+        src("ovl-ruler")?.setGeoJson(Geo.lineFc(outline))
+        src("ovl-ruler-area")?.setGeoJson(if (visible && rulerAreaMode) Geo.polygonFc(points) else Geo.polygonFc(emptyList()))
+        src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(points))
         updateInfo()
     }
 
@@ -808,27 +1224,72 @@ class MainActivity : AppCompatActivity() {
                 refreshTrack()
                 updateInfo()
                 ui.postDelayed(this, 5000)
+            } else {
+                val id = prefs.getLong("rec_track", 0L)
+                val started = prefs.getLong("rec_started_at", 0L)
+                if (id > 0L && System.currentTimeMillis() - started > 10_000L) {
+                    prefs.edit().putLong("rec_track", 0L).putLong("rec_started_at", 0L).apply()
+                    shownTrackId = id
+                    prefs.edit().putLong("shown_track", id).apply()
+                    refreshTrack()
+                    updateInfo()
+                    refreshRecButton()
+                    toast("Служба записи остановилась. Сохранённый трек оставлен на телефоне.")
+                } else if (id > 0L) {
+                    ui.postDelayed(this, 1000)
+                }
             }
         }
     }
 
     private fun scheduleTick() {
         ui.removeCallbacks(tick)
-        if (TrackService.running) ui.postDelayed(tick, 1000)
+        if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) ui.postDelayed(tick, 1000)
+    }
+
+    private fun requestElevation(lat: Double, lon: Double) {
+        val db = elevation ?: return
+        val key = String.format(Locale.US, "%.5f/%.5f", lat, lon)
+        if (key == elevationKey) return
+        elevationKey = key
+        elevationValue = null
+        val generation = ++elevationGeneration
+        elevationTask?.let { ui.removeCallbacks(it) }
+        val task = Runnable {
+            thread(name = "elevation-read") {
+                val value = try { db.at(lat, lon) } catch (_: Exception) { null }
+                runOnUiThread {
+                    if (generation == elevationGeneration && !isFinishing && !isDestroyed) {
+                        elevationValue = value
+                        updateInfo()
+                    }
+                }
+            }
+        }
+        elevationTask = task
+        ui.postDelayed(task, 100)
     }
 
     private fun updateInfo() {
         val m = map ?: return
         val c = m.cameraPosition.target ?: return
+        requestElevation(c.latitude, c.longitude)
         val sb = StringBuilder(Geo.fmtCoord(c.latitude, c.longitude))
-        elevation?.at(c.latitude, c.longitude)?.let { sb.append("  ·  ≈ $it м") }
+        elevationValue?.let { sb.append("  ·  ≈ $it м") }
         sb.append("  ·  z").append(String.format(Locale.US, "%.1f", m.cameraPosition.zoom))
         myLoc?.let {
             sb.append("\nGPS: ±").append(it.accuracy.roundToInt()).append(" м")
             if (it.hasAltitude()) sb.append(", высота ").append(it.altitude.roundToInt()).append(" м")
         } ?: run { if (locActive) sb.append("\nGPS: ожидание сигнала…") }
-        if (rulerOn) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
-            .append(" (тап — новая точка)")
+        if (rulerOn && navMode == NavMode.IDLE) {
+            if (rulerAreaMode) {
+                sb.append("\nПлощадь: ").append(if (rulerPts.size >= 3) Geo.fmtArea(Geo.areaSquareMeters(rulerPts)) else "добавьте ещё ${3 - rulerPts.size} точ.")
+                if (rulerPts.size >= 2) sb.append(" · периметр: ").append(Geo.fmtDist(Geo.length(rulerPts + rulerPts.first())))
+            } else {
+                sb.append("\nРасстояние: ").append(Geo.fmtDist(Geo.length(rulerPts)))
+            }
+            sb.append(" (тап — добавить точку)")
+        }
         if (TrackService.running) sb.append("\n● REC трек пишется")
         tvInfo.text = sb.toString()
     }
@@ -836,27 +1297,46 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ search
 
     private fun runSearch(q: String) {
-        if (q.trim().length < 2) {
+        searchTask?.let { ui.removeCallbacks(it) }
+        val generation = ++searchGeneration
+        val query = q.trim()
+        if (query.length < 2) {
+            searchResults = emptyList()
             showResults(false)
             return
         }
         val db = placeDb
         if (db == null) {
             toast("Индекс поиска не найден в APK")
+            showResults(false)
             return
         }
-        searchResults = db.search(q)
-        val items = searchResults.map { p ->
-            val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
-            val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
-            names to extra
+        val task = Runnable {
+            thread(name = "place-search") {
+                val result = try { db.search(query) to null } catch (e: Exception) { emptyList<PlaceDb.Place>() to e }
+                runOnUiThread {
+                    if (generation != searchGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                    val (found, error) = result
+                    if (error != null) {
+                        searchResults = emptyList()
+                        showResults(false)
+                        toast("Ошибка поиска: ${error.message}")
+                    } else {
+                        searchResults = found
+                        val items = found.map { p ->
+                            val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
+                            val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
+                            names to extra
+                        }
+                        lvResults.adapter = ResultsAdapter(items)
+                        resizeSearchResults()
+                        showResults(items.isNotEmpty())
+                    }
+                }
+            }
         }
-        lvResults.adapter = ResultsAdapter(items)
-        val dp = resources.displayMetrics.density
-        lvResults.layoutParams = lvResults.layoutParams.apply {
-            height = minOf((items.size * 64 * dp).roundToInt(), (320 * dp).roundToInt())
-        }
-        showResults(items.isNotEmpty())
+        searchTask = task
+        ui.postDelayed(task, 250)
     }
 
     private inner class ResultsAdapter(private val items: List<Pair<String, String>>) : BaseAdapter() {
@@ -872,6 +1352,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSearchResult(p: PlaceDb.Place) {
+        searchTask?.let { ui.removeCallbacks(it) }
+        searchTask = null
+        searchGeneration++
         val ll = LatLng(p.lat, p.lon)
         src("ovl-search")?.setGeoJson(Geo.pointFc(listOf(ll)))
         val z = when (p.kind) {
@@ -904,20 +1387,50 @@ class MainActivity : AppCompatActivity() {
 
     private val locListener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
-            val first = myLoc == null
+            val now = System.currentTimeMillis()
+            val current = myLoc
+            val candidateAccuracy = l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+            val currentAccuracy = current?.accuracy?.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+            if (!LocationQuality.shouldAccept(l.time, candidateAccuracy, current?.time ?: 0L, currentAccuracy, now)) return
             myLoc = l
             refreshMe()
-            if (navMode == NavMode.ACTIVE) onNavLocation(l)
-            else if ((first || following) && map != null) {
+            if (navMode == NavMode.ACTIVE && LocationQuality.isUsableForNavigation(l.time, candidateAccuracy, now, navProfile)) {
+                lastNavFixAt = now
+                if (navGpsLost) { navGpsLost = false; speak("Сигнал GPS восстановлен") }
+                onNavLocation(l)
+            }
+            else if (navMode != NavMode.ACTIVE && following && map != null) {
                 val z = maxOf(map!!.cameraPosition.zoom, 14.0)
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(l.latitude, l.longitude), z), 600)
-                following = true
             }
             updateInfo()
         }
 
         override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
+
+        override fun onProviderDisabled(provider: String) {
+            val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+            val anyEnabled = try {
+                val fine = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                val coarse = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                (fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) ||
+                    ((fine || coarse) && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
+            } catch (_: Exception) { false }
+            if (!anyEnabled) {
+                if (navMode == NavMode.ACTIVE) stopNav()
+                locationRequestedByUser = false
+                locActive = false
+                following = false
+                prefs.edit().putBoolean("location_user_enabled", false).putBoolean("location_follow", false).apply()
+                stopLocationUpdates()
+                myLoc = null
+                refreshMe()
+                refreshLocationButton()
+                updateInfo()
+                toast("Геолокация отключена")
+            }
+        }
+
         @Deprecated("Deprecated in Java")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
@@ -925,9 +1438,20 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun startLocation(userRequested: Boolean) {
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val net = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        val finePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarsePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val gps = finePermission && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val net = (finePermission || coarsePermission) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         if (!gps && !net) {
+            locActive = false
+            locationRequestedByUser = false
+            following = false
+            prefs.edit().putBoolean("location_user_enabled", false).putBoolean("location_follow", false).apply()
+            if (navMode == NavMode.ACTIVE) stopNav()
+            myLoc = null
+            refreshMe()
+            refreshLocationButton()
+            updateInfo()
             MaterialAlertDialogBuilder(this)
                 .setMessage("Геолокация выключена. Включите GPS в настройках телефона.")
                 .setPositiveButton("Настройки") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
@@ -936,7 +1460,10 @@ class MainActivity : AppCompatActivity() {
         }
         locActive = true
         if (userRequested) {
+            locationRequestedByUser = true
             following = true
+            prefs.edit().putBoolean("location_user_enabled", true).putBoolean("location_follow", true).apply()
+            refreshLocationButton()
             myLoc?.let {
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 15.0), 600)
             }
@@ -946,12 +1473,22 @@ class MainActivity : AppCompatActivity() {
             lm.removeUpdates(locListener)
             if (gps) lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locListener, Looper.getMainLooper())
             if (net) lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, locListener, Looper.getMainLooper())
-            if (myLoc == null) {
-                last = (if (gps) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null)
-                    ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                    ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-            }
+            last = listOfNotNull(
+                if (gps) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null,
+                if (net) lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) else null,
+                lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            ).maxByOrNull { it.time }
         } catch (e: SecurityException) {
+            locActive = false
+            locationRequestedByUser = false
+            following = false
+            prefs.edit().putBoolean("location_user_enabled", false).putBoolean("location_follow", false).apply()
+            stopLocationUpdates()
+            if (navMode == NavMode.ACTIVE) stopNav()
+            myLoc = null
+            refreshMe()
+            refreshLocationButton()
+            updateInfo()
             toast(getString(R.string.no_location))
         }
         last?.let { locListener.onLocationChanged(it) }
@@ -964,10 +1501,40 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ menu
 
+    private fun chooseMeasurementMode() {
+        val current = if (!rulerOn) "выключено" else if (rulerAreaMode) "площадь" else "расстояние"
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Измерение · сейчас: $current")
+            .setItems(arrayOf("Измерять расстояние", "Измерять площадь",
+                "Отменить последнюю точку", "Выключить и очистить")) { _, which ->
+                when (which) {
+                    0, 1 -> {
+                        val area = which == 1
+                        if (!rulerOn || rulerAreaMode != area) rulerPts.clear()
+                        rulerOn = true
+                        rulerAreaMode = area
+                        prefs.edit().putBoolean("ruler_on", true).putBoolean("ruler_area_mode", area).apply()
+                        toast(if (area) "Режим площади: отмечайте вершины контура" else "Режим расстояния: отмечайте точки линии")
+                    }
+                    2 -> if (rulerPts.isNotEmpty()) rulerPts.removeAt(rulerPts.lastIndex)
+                        else toast("Пока нет точек для отмены")
+                    3 -> {
+                        rulerOn = false
+                        rulerPts.clear()
+                        prefs.edit().putBoolean("ruler_on", false).apply()
+                    }
+                }
+                refreshRuler()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun showMenu() {
         val langs = enabledLanguages().joinToString(" · ") { it.name }.ifEmpty { "выкл" }
-        val hasRelief = File(filesDir, "relief.mbtiles").exists()
-        val hasContours = File(filesDir, "contours.mbtiles").exists()
+        val hasRelief = mapPackage.reliefAsset?.let { mapPackage.file(filesDir, it).exists() } == true
+        val hasContours = mapPackage.contoursAsset?.let { mapPackage.file(filesDir, it).exists() } == true
+        val recordBusy = TrackService.running || prefs.getLong("rec_track", 0L) > 0L
         val modeName = when (themeMode()) { "light" -> "светлый"; "dark" -> "тёмный"; "twilight" -> "сумерки"; else -> "авто" }
         MenuUi.show(
             this, "Меню",
@@ -975,16 +1542,14 @@ class MainActivity : AppCompatActivity() {
                 MenuTile(R.drawable.ic_navigation, "Навигатор", navMode != NavMode.IDLE) { openNavigatorChooser() },
                 MenuTile(R.drawable.ic_compass, "Компас", false) { compass.show(CompassController.Mode.NORTH) },
                 MenuTile(R.drawable.ic_qibla, "Кибла", false) { compass.show(CompassController.Mode.QIBLA) },
-                MenuTile(R.drawable.ic_bookmark, "Точки", false) { showWaypoints() },
-                MenuTile(R.drawable.ic_straighten, "Линейка", rulerOn) {
-                    rulerOn = !rulerOn
-                    if (!rulerOn) rulerPts.clear()
-                    refreshRuler()
-                }
+                MenuTile(R.drawable.ic_bookmark, "Мои точки", false) { showWaypoints() },
+                MenuTile(R.drawable.ic_straighten, "Измерения", rulerOn) { chooseMeasurementMode() }
             ),
             listOf(
                 MenuSection("Карта", listOf(
+                    MenuRow.Link("Пакеты карт", "${MapPackages.all(filesDir).size} установлено") { showMapPackages() },
                     MenuRow.Link("Языки названий", langs) { showLanguageDialog() },
+                    MenuRow.Link("Перейти к координатам") { gotoCoordinatesDialog() },
                     MenuRow.Toggle("Рельеф", if (hasRelief) "Тени гор на карте" else "Нет данных в APK",
                         prefs.getBoolean("relief_on", true) && hasRelief, hasRelief) { on ->
                         prefs.edit().putBoolean("relief_on", on).apply()
@@ -1002,32 +1567,263 @@ class MainActivity : AppCompatActivity() {
                 MenuSection("Навигация", listOf(
                     MenuRow.Toggle("Голосовые подсказки", "Нужен русский голос в системе",
                         prefs.getBoolean("nav_voice", true)) { on -> prefs.edit().putBoolean("nav_voice", on).apply() },
-                    MenuRow.Link("Транспорт по умолчанию", profileName(navProfile)) { showNavProfileDialog() }
+                    MenuRow.Link("Режим навигации", profileName(navProfile)) { showNavProfileDialog() },
+                    MenuRow.Link("Предпочтение маршрута", routePreferenceName(routePreference)) { showRoutePreferenceDialog() },
+                    MenuRow.Link("По возможности избегать", routeAvoidanceSummary()) { showRouteAvoidanceDialog() },
+                    MenuRow.Link("Автопауза записи трека", trackAutoPauseSummary()) { showTrackAutoPauseDialog() },
+                    MenuRow.Link("Экспедиция и безопасность", "GPS · координаты · запись трека") { showExpeditionPanel() }
                 )),
                 MenuSection("Мои данные", listOf(
-                    MenuRow.Toggle("Кнопка записи трека", "На главном экране справа; выключите, если запись не нужна",
-                        prefs.getBoolean("rec_button", true)) { on ->
+                    MenuRow.Toggle("Кнопка записи трека",
+                        if (recordBusy) "Остановите запись, чтобы скрыть кнопку" else "Показывать кнопку на главном экране",
+                        prefs.getBoolean("rec_button", true), !recordBusy) { on ->
                         prefs.edit().putBoolean("rec_button", on).apply()
-                        if (!on && TrackService.running) toggleRecording()   // hiding the button also stops a running recording
                         refreshRecButton()
                     },
                     MenuRow.Link("Мои треки") { showTracks() },
-                    MenuRow.Link("Перейти к координатам") { gotoCoordinatesDialog() },
                     MenuRow.Link("Экспорт GPX") {
-                        exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
+                        if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) {
+                            toast("Остановите запись перед экспортом GPX, чтобы сохранить все точки")
+                        } else {
+                            exportLauncher.launch("georgia-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
+                        }
                     },
                     MenuRow.Link("Импорт GPX") { importLauncher.launch(arrayOf("*/*")) }
                 )),
                 MenuSection("О приложении", listOf(
                     MenuRow.Link("Справка") { showInfo() },
-                    MenuRow.Link("Диагностика") { showDiagnostics() },
-                    MenuRow.Toggle("Простые подписи", "Для отладки карты", prefs.getBoolean("labels_simple", false)) { on ->
-                        prefs.edit().putBoolean("labels_simple", on).apply()
-                        style?.let { applyLabels(it) }
-                    }
+                    MenuRow.Link("Диагностика") { showDiagnostics() }
                 ))
             )
         )
+    }
+
+    private fun showMapPackages() {
+        val packages = MapPackages.all(filesDir)
+        val labels = packages.map { pack ->
+            (if (pack.id == mapPackage.id) "✓ " else "") + pack.title + " · " + pack.countryCode
+        }.toTypedArray()
+        MaterialAlertDialogBuilder(this).setTitle("Пакеты офлайн-карт")
+            .setItems(labels) { _, index ->
+                val selected = packages[index]
+                if (selected.id == mapPackage.id) {
+                    toast("Уже выбрана карта «${selected.title}»")
+                } else {
+                    selectMapPackage(selected)
+                }
+            }
+            .setNeutralButton("Импортировать .gmap") { _, _ ->
+                mapPackageImportLauncher.launch(arrayOf("*/*"))
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun selectMapPackage(selected: MapPackage) {
+        fun applySelection() {
+            if (navMode != NavMode.IDLE) stopNav()
+            prefs.edit().putString("map_package_id", selected.id)
+                .putBoolean("reset_map_camera", true).apply()
+            recreate()
+        }
+        if (navMode != NavMode.IDLE) {
+            MaterialAlertDialogBuilder(this)
+                .setMessage("Смена карты завершит текущий маршрут. Продолжить?")
+                .setPositiveButton("Сменить карту") { _, _ -> applySelection() }
+                .setNegativeButton("Остаться", null)
+                .show()
+        } else applySelection()
+    }
+
+    private fun importMapPackage(uri: Uri) {
+        loadingText.text = "Устанавливаю пакет карты…"
+        loading.visibility = View.VISIBLE
+        thread(name = "map-package-import") {
+            try {
+                val pack = contentResolver.openInputStream(uri)?.use { input ->
+                    MapPackageInstaller.install(input, filesDir)
+                } ?: error("Не удалось открыть архив пакета")
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        MaterialAlertDialogBuilder(this)
+                            .setTitle("Пакет установлен")
+                            .setMessage("«${pack.title}» добавлен. Переключить карту сейчас?")
+                            .setPositiveButton("Переключить") { _, _ -> selectMapPackage(pack) }
+                            .setNegativeButton("Позже", null)
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        toast("Не удалось установить пакет: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showExpeditionPanel() {
+        val location = myLoc
+        val now = System.currentTimeMillis()
+        val hasFreshFix = location != null &&
+            LocationQuality.isFresh(location.time, now, 30_000L) &&
+            location.latitude.isFinite() && location.longitude.isFinite()
+        val coordinates = location?.takeIf { hasFreshFix }?.let {
+            Geo.fmtCoord(it.latitude, it.longitude)
+        } ?: "Нет свежих координат GPS"
+        val accuracy = location?.accuracy?.takeIf { it.isFinite() && it > 0f }
+        val ageSeconds = location?.let { ((now - it.time).coerceAtLeast(0L) / 1000L) }
+        val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val batteryLevel = battery?.let {
+            val level = it.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+            val scale = it.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+            if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+        } ?: -1
+        val isCharging = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } == true
+        val batteryStatus = when {
+            batteryLevel < 0 -> "Заряд батареи: неизвестен"
+            isCharging -> "Заряд батареи: $batteryLevel% · подключено питание"
+            batteryLevel <= 10 -> "⚠ Критически низкий заряд: $batteryLevel%"
+            batteryLevel <= 20 -> "⚠ Низкий заряд батареи: $batteryLevel%"
+            else -> "Заряд батареи: $batteryLevel%"
+        }
+        val status = (if (hasFreshFix) {
+            "Координаты: $coordinates\n" +
+                (accuracy?.let { "Точность: ±${it.roundToInt()} м\n" } ?: "Точность: неизвестна\n") +
+                "Последнее обновление: ${ageSeconds ?: 0} сек."
+        } else {
+            "$coordinates\nВключите GPS и дождитесь актуального местоположения."
+        }) + "\n" + batteryStatus
+
+        val density = resources.displayMetrics.density
+        val pad = (18 * density).toInt()
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        content.addView(android.widget.TextView(this).apply {
+            text = status
+            textSize = 16f
+            setTextIsSelectable(true)
+        })
+        val emergencyNumber = mapPackage.emergencyNumber
+        content.addView(android.widget.TextView(this).apply {
+            text = "\nПеред выходом:\n• Сохраните маршрут и важные точки\n• Сообщите близким маршрут и время возвращения\n" +
+                "• Проверьте прогноз погоды и местные ограничения дорог/перевалов\n" +
+                "• Возьмите воду, тёплую одежду, аптечку и запас питания\n" +
+                "• Зарядите телефон и возьмите внешний аккумулятор\n" +
+                "• В горах не полагайтесь только на GPS и офлайн-карту\n\n" +
+                (emergencyNumber?.let { "Экстренный номер региона: $it" }
+                    ?: "Экстренный номер для этого региона не указан в пакете карт. Уточните его заранее.")
+            textSize = 14f
+        })
+
+        fun action(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+            val button = android.widget.Button(this).apply {
+                text = label
+                isEnabled = enabled
+                setOnClickListener { onClick() }
+            }
+            content.addView(button, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+
+        action("Обновить GPS") {
+            withLocationPermission { startLocation(true) }
+        }
+        action("Скопировать координаты", hasFreshFix) {
+            val clip = android.content.ClipData.newPlainText("Координаты", coordinates)
+            (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(clip)
+            toast("Координаты скопированы")
+        }
+        action("Поделиться координатами", hasFreshFix) {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, coordinates)
+            }, "Поделиться координатами"))
+        }
+        action("Ближайшие больницы, полиция и населённые пункты", hasFreshFix && placeDb != null) {
+            location?.let { showNearbySafetyPlaces(it.latitude, it.longitude) }
+        }
+        action(if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) "Остановить запись трека" else "Начать запись трека") {
+            toggleRecording()
+        }
+        action(
+            emergencyNumber?.let { "Экстренный вызов $it" } ?: "Экстренный номер не задан",
+            emergencyNumber != null
+        ) {
+            try {
+                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$emergencyNumber")))
+            } catch (_: Exception) {
+                toast("Не удалось открыть приложение телефона")
+            }
+        }
+
+        val scroll = android.widget.ScrollView(this).apply { addView(content) }
+        MaterialAlertDialogBuilder(this).setTitle("Экспедиция и безопасность")
+            .setView(scroll).setPositiveButton("Закрыть", null).show()
+    }
+
+    private fun showNearbySafetyPlaces(lat: Double, lon: Double) {
+        val db = placeDb ?: run {
+            toast("В выбранном пакете нет офлайн-индекса мест")
+            return
+        }
+        val generation = ++safetyLookupGeneration
+        val progress = MaterialAlertDialogBuilder(this)
+            .setMessage("Ищу ближайшие объекты в офлайн-карте…")
+            .setNegativeButton("Отмена") { _, _ -> safetyLookupGeneration++ }
+            .create()
+        progress.setOnCancelListener { if (generation == safetyLookupGeneration) safetyLookupGeneration++ }
+        progress.show()
+        thread(name = "nearby-safety-places") {
+            val groups = try {
+                listOf(
+                    "Медицина" to db.nearbyKinds(lat, lon,
+                        listOf("hospital", "clinic", "doctors", "dentist"), 5),
+                    "Полиция и пожарные службы" to db.nearbyKinds(lat, lon,
+                        listOf("police", "fire_station", "emergency"), 5),
+                    "Населённые пункты" to db.nearbyKinds(lat, lon,
+                        listOf("city", "town", "village", "hamlet", "suburb", "isolated_dwelling"), 5)
+                )
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val nearby = groups.flatMap { (category, places) -> places.map { category to it } }
+            runOnUiThread {
+                if (generation != safetyLookupGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                if (nearby.isEmpty()) {
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle("Ближайшие объекты")
+                        .setMessage("В офлайн-данных этого региона подходящие объекты не найдены. Это не означает, что поблизости нет больниц или служб.")
+                        .setPositiveButton("Закрыть", null).show()
+                    return@runOnUiThread
+                }
+                val labels = nearby.map { (category, item) ->
+                    val p = item.place
+                    val name = p.ru.ifBlank { p.ka.ifBlank { p.en } }
+                    "$category · $name\n${Geo.fmtDist(item.distanceM)}"
+                }.toTypedArray()
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Ближайшие объекты · офлайн")
+                    .setItems(labels) { _, index ->
+                        val place = nearby[index].second.place
+                        val target = LatLng(place.lat, place.lon)
+                        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.0))
+                        val name = place.ru.ifBlank { place.ka.ifBlank { place.en } }
+                        tvInfo.text = "$name · ${Geo.fmtCoord(place.lat, place.lon)}"
+                        tvInfo.visibility = View.VISIBLE
+                    }
+                    .setPositiveButton("Закрыть", null)
+                    .show()
+            }
+        }
     }
 
     private fun showLanguageDialog() {
@@ -1045,38 +1841,140 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ waypoints
 
     private fun addWaypointDialog(ll: LatLng) {
-        val et = EditText(this)
-        et.setText("Точка ${userDb.waypoints().size + 1}")
-        et.setSelectAllOnFocus(true)
+        val name = EditText(this).apply {
+            setText("Точка ${waypointCache.size + 1}")
+            setSelectAllOnFocus(true)
+            hint = "Название"
+        }
+        val note = EditText(this).apply {
+            hint = "Заметка (необязательно)"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(2_000))
+            minLines = 2
+            maxLines = 4
+            setSingleLine(false)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val category = EditText(this).apply {
+            setText("Общее")
+            hint = "Категория"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val folder = EditText(this).apply {
+            setText("Без папки")
+            hint = "Папка"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(20f)
+            setPadding(pad, dp(8f), pad, 0)
+            addView(name, LinearLayout.LayoutParams(-1, -2))
+            addView(category, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
+            addView(folder, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4f) })
+            addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle("Сохранить точку\n" + Geo.fmtCoord(ll.latitude, ll.longitude))
-            .setView(et)
+            .setView(content)
             .setPositiveButton("Сохранить") { _, _ ->
-                userDb.addWaypoint(et.text.toString().ifBlank { "Точка" }, ll.latitude, ll.longitude)
+                userDb.addWaypoint(name.text.toString().ifBlank { "Точка" },
+                    ll.latitude, ll.longitude, note.text.toString(), category.text.toString(), folder.text.toString())
                 refreshWaypoints()
             }
             .setNegativeButton("Отмена", null).show()
     }
 
+    private fun editWaypointNote(waypoint: UserDb.Wpt) {
+        val note = EditText(this).apply {
+            setText(waypoint.note)
+            hint = "Заметка"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(2_000))
+            minLines = 3
+            maxLines = 6
+            setSingleLine(false)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Заметка: ${waypoint.name}")
+            .setView(note)
+            .setPositiveButton("Сохранить") { _, _ ->
+                userDb.updateWaypointNote(waypoint.id, note.text.toString())
+                refreshWaypoints()
+                toast("Заметка сохранена")
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun editWaypointGrouping(waypoint: UserDb.Wpt) {
+        val category = EditText(this).apply {
+            setText(waypoint.category)
+            hint = "Категория"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val folder = EditText(this).apply {
+            setText(waypoint.folder)
+            hint = "Папка"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(20f)
+            setPadding(pad, dp(8f), pad, 0)
+            addView(category, LinearLayout.LayoutParams(-1, -2))
+            addView(folder, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8f) })
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Категория и папка: ${waypoint.name}")
+            .setView(content)
+            .setPositiveButton("Сохранить") { _, _ ->
+                userDb.updateWaypointGrouping(waypoint.id, category.text.toString(), folder.text.toString())
+                refreshWaypoints()
+                toast("Категория и папка сохранены")
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun showWaypoints() {
-        val list = userDb.waypoints()
-        if (list.isEmpty()) { toast("Точек нет. Долгое нажатие на карту или кнопка «Точка»"); return }
-        val items = list.map { "${it.name}\n${Geo.fmtCoord(it.lat, it.lon)}" }.toTypedArray()
-        MaterialAlertDialogBuilder(this).setTitle("Мои точки").setItems(items) { _, i ->
-            val w = list[i]
-            MaterialAlertDialogBuilder(this).setTitle(w.name)
-                .setItems(arrayOf("Перейти", "Маршрут сюда", "Удалить")) { _, a ->
-                    when (a) {
-                        0 -> flyTo(w.lat, w.lon, 15.0)
-                        1 -> setDestination(LatLng(w.lat, w.lon), w.name)
-                        else -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
-                    }
+        val generation = ++listLoadGeneration
+        val progress = MaterialAlertDialogBuilder(this).setMessage("Загружаю сохранённые точки…")
+            .setNegativeButton("Отмена") { _, _ -> listLoadGeneration++ }.create()
+        progress.setOnCancelListener { if (generation == listLoadGeneration) listLoadGeneration++ }
+        progress.show()
+        thread(name = "waypoint-list") {
+            val list = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
+            val items = list.map { (if (it.favorite) "★ " else "") + it.name + "\n" + Geo.fmtCoord(it.lat, it.lon) + "\n" + it.category + " · " + it.folder + (if (it.note.isNotBlank()) "\n" + it.note.take(60) else "") }.toTypedArray()
+            runOnUiThread {
+                if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                if (list.isEmpty()) { toast("Точек нет. Долгое нажатие на карту или кнопка «Точка»"); return@runOnUiThread }
+                MaterialAlertDialogBuilder(this).setTitle("Мои точки").setItems(items) { _, i ->
+                    val w = list[i]
+                    val favoriteAction = if (w.favorite) "Убрать из избранного" else "В избранное"
+                    MaterialAlertDialogBuilder(this).setTitle(w.name)
+                          .setItems(arrayOf("Перейти", "Маршрут сюда", favoriteAction, "Заметка", "Категория и папка", "Удалить")) { _, a ->
+                            when (a) {
+                                0 -> flyTo(w.lat, w.lon, 15.0)
+                                1 -> setDestination(LatLng(w.lat, w.lon), w.name)
+                                2 -> { userDb.setWaypointFavorite(w.id, !w.favorite); refreshWaypoints(); toast(if (w.favorite) "Убрано из избранного" else "Добавлено в избранное") }
+                                3 -> editWaypointNote(w)
+                                4 -> editWaypointGrouping(w)
+                                5 -> { userDb.deleteWaypoint(w.id); refreshWaypoints() }
+                            }
+                        }.show()
                 }.show()
-        }.show()
+            }
+        }
     }
 
     private fun flyTo(lat: Double, lon: Double, zoom: Double) {
         following = false
+        prefs.edit().putBoolean("location_follow", false).apply()
         map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lon), zoom), 800)
     }
 
@@ -1098,162 +1996,365 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ tracks
 
     /** The record button lives in the control capsule on the map; the menu setting shows or hides it. */
+    private fun refreshLocationButton() {
+        val btn = findViewById<android.widget.ImageButton>(R.id.btnLocation)
+        val active = locationRequestedByUser || navMode == NavMode.ACTIVE
+        btn.setBackgroundResource(if (active) R.drawable.bg_chip_selected else R.drawable.bg_icon_btn)
+        btn.contentDescription = when {
+            navMode == NavMode.ACTIVE -> "Перейти к моему местоположению"
+            locationRequestedByUser -> "Остановить отображение GPS"
+            else -> "Показать моё местоположение"
+        }
+    }
+
+    private fun updateFloatingControls() {
+        val resultsVisible = lvResults.visibility == View.VISIBLE
+        val inNavigation = navMode != NavMode.IDLE
+        val locationVisible = !resultsVisible
+        val fitVisible = !inNavigation && !resultsVisible && resources.configuration.screenHeightDp >= 380
+        val recBusy = TrackService.running || prefs.getLong("rec_track", 0L) > 0L
+        val recVisible = recBusy || (prefs.getBoolean("rec_button", true) && !resultsVisible)
+
+        findViewById<View>(R.id.btnFit).visibility = if (fitVisible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.fitDivider).visibility = if (fitVisible && locationVisible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btnLocation).visibility = if (locationVisible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.recDivider).visibility = if (recVisible && locationVisible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btnRec).visibility = if (recVisible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.controls).visibility =
+            if (fitVisible || locationVisible || recVisible) View.VISIBLE else View.GONE
+    }
+
     private fun refreshRecButton() {
         val btn = findViewById<android.widget.ImageButton>(R.id.btnRec)
-        val on = prefs.getBoolean("rec_button", true)
         val rec = TrackService.running
-        btn.visibility = if (on) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.recDivider).visibility = if (on) View.VISIBLE else View.GONE
-        btn.setImageResource(if (rec) R.drawable.ic_stop else R.drawable.ic_record)
-        btn.setBackgroundResource(if (rec) R.drawable.bg_rec_active else R.drawable.bg_icon_btn)
-        btn.contentDescription = if (rec) "Остановить запись трека" else "Начать запись трека"
+        val pending = !rec && prefs.getLong("rec_track", 0L) > 0L
+        val busy = rec || pending
+        btn.setImageResource(if (busy) R.drawable.ic_stop else R.drawable.ic_record)
+        btn.setBackgroundResource(if (busy) R.drawable.bg_rec_active else R.drawable.bg_icon_btn)
+        btn.contentDescription = when {
+            rec -> "Остановить запись трека"
+            pending -> "Отменить запуск записи"
+            else -> "Начать запись трека"
+        }
+        updateFloatingControls()
     }
 
     private fun toggleRecording() {
+        if (GpxTransferLock.isBusy) {
+            toast("Дождитесь завершения импорта или экспорта GPX")
+            return
+        }
         if (TrackService.running) {
             val savedId = prefs.getLong("rec_track", 0L)
             stopService(Intent(this, TrackService::class.java))
-            prefs.edit().putLong("rec_track", 0L).apply()
+            prefs.edit().putLong("rec_track", 0L).putLong("rec_started_at", 0L).apply()
             ui.postDelayed({ refreshTrack(); updateInfo(); refreshRecButton() }, 400)
             MaterialAlertDialogBuilder(this).setTitle("Трек сохранён")
                 .setMessage("Запись остановлена, маршрут сохранён на телефоне.\n\nНайти его: Меню → «Мои данные» → «Мои треки». " +
                     "Там трек можно показать на карте или удалить, а «Экспорт GPX» сохранит файл для других программ.")
                 .setPositiveButton("Показать на карте") { _, _ ->
-                    if (savedId > 0) { shownTrackId = savedId; refreshTrack(); fitTrack(savedId) }
+                    if (savedId > 0) { shownTrackId = savedId; prefs.edit().putLong("shown_track", savedId).apply(); refreshTrack(); fitTrack(savedId) }
                 }
                 .setNegativeButton("Закрыть", null).show()
             return
         }
+        val pendingId = prefs.getLong("rec_track", 0L)
+        if (pendingId > 0L) {
+            stopService(Intent(this, TrackService::class.java))
+            prefs.edit().putLong("rec_track", 0L).putLong("rec_started_at", 0L).apply()
+            shownTrackId = pendingId
+            prefs.edit().putLong("shown_track", pendingId).apply()
+            refreshTrack()
+            updateInfo()
+            refreshRecButton()
+            toast("Запуск записи отменён; пустой трек сохранён")
+            return
+        }
         withLocationPermission {
+            val lm = getSystemService(LOCATION_SERVICE) as LocationManager
+            if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER) &&
+                !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                MaterialAlertDialogBuilder(this)
+                    .setMessage("Для записи трека включите геолокацию телефона.")
+                    .setPositiveButton("Настройки") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
+                    .setNegativeButton("Отмена", null).show()
+                return@withLocationPermission
+            }
             val id = userDb.newTrack("Трек " + SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date()))
-            prefs.edit().putLong("rec_track", id).apply()
+            prefs.edit().putLong("rec_track", id).putLong("rec_started_at", System.currentTimeMillis()).apply()
             shownTrackId = id
+            prefs.edit().putLong("shown_track", id).apply()
             ContextCompat.startForegroundService(this, Intent(this, TrackService::class.java))
-            startLocation(false)
+            // TrackService owns its GPS subscription; the activity must not start a second one.
             ui.postDelayed({ scheduleTick(); updateInfo(); refreshRecButton() }, 800)
             toast("Запись трека началась")
         }
     }
 
     private fun showTracks() {
-        val list = userDb.tracks()
-        if (list.isEmpty()) { toast("Треков пока нет"); return }
-        val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
-        val items = list.map {
-            val len = Geo.length(userDb.trackLatLng(it.id))
-            "${it.name}\n${fmt.format(Date(it.start))} · ${it.count} точек · ${Geo.fmtDist(len)}"
-        }.toTypedArray()
-        MaterialAlertDialogBuilder(this).setTitle("Мои треки").setItems(items) { _, i ->
-            val t = list[i]
-            MaterialAlertDialogBuilder(this).setTitle(t.name)
-                .setItems(arrayOf("Показать на карте", "Скрыть", "Удалить")) { _, a ->
-                    when (a) {
-                        0 -> { shownTrackId = t.id; refreshTrack(); fitTrack(t.id) }
-                        1 -> { shownTrackId = -1L; refreshTrack() }
-                        2 -> {
-                            if (TrackService.running && prefs.getLong("rec_track", 0L) == t.id) toast("Сначала остановите запись")
-                            else { userDb.deleteTrack(t.id); if (shownTrackId == t.id) shownTrackId = -1L; refreshTrack() }
-                        }
-                    }
+        val generation = ++listLoadGeneration
+        val progress = MaterialAlertDialogBuilder(this).setMessage("Загружаю список треков…")
+            .setNegativeButton("Отмена") { _, _ -> listLoadGeneration++ }.create()
+        progress.setOnCancelListener { if (generation == listLoadGeneration) listLoadGeneration++ }
+        progress.show()
+        thread(name = "track-list") {
+            val list = try { userDb.tracks() } catch (_: Exception) { emptyList() }
+            val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+            val items = try {
+                list.map { track ->
+                    val segments = userDb.trackSegments(track.id)
+                    val stats = TrackStats.calculate(segments.map { segment ->
+                        segment.map { p -> TrackStats.Sample(p.lat, p.lon, p.ele, p.ts) }
+                    })
+                    val elevation = if (stats.elevationSamples > 1) {
+                        " · ↑${stats.ascentM.roundToInt()} м ↓${stats.descentM.roundToInt()} м"
+                    } else ""
+                    "${track.name}\n${fmt.format(Date(track.start))} · ${track.count} точек · ${Geo.fmtDist(stats.distanceM)}${elevation}"
+                }.toTypedArray()
+            } catch (_: Exception) { emptyArray() }
+            runOnUiThread {
+                if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                if (list.isEmpty()) { toast("Треков пока нет"); return@runOnUiThread }
+                MaterialAlertDialogBuilder(this).setTitle("Мои треки").setItems(items) { _, i ->
+                    val t = list[i]
+                    MaterialAlertDialogBuilder(this).setTitle(t.name)
+                        .setItems(arrayOf("Показать на карте", "Скрыть", "Статистика", "Удалить")) { _, a ->
+                            when (a) {
+                                0 -> { shownTrackId = t.id; prefs.edit().putLong("shown_track", t.id).apply(); refreshTrack(); fitTrack(t.id) }
+                                1 -> { if (shownTrackId == t.id) { shownTrackId = -1L; prefs.edit().putLong("shown_track", -1L).apply() }; refreshTrack() }
+                                2 -> showTrackStats(t)
+                                3 -> {
+                                    if (GpxTransferLock.isBusy) {
+                                        toast("Дождитесь завершения операции GPX")
+                                    } else if (prefs.getLong("rec_track", 0L) == t.id) {
+                                        toast("Сначала остановите запись")
+                                    } else {
+                                        loadingText.text = "Удаляю трек…"
+                                        loading.visibility = View.VISIBLE
+                                        thread(name = "track-delete") {
+                                            val deleted = try { userDb.deleteTrack(t.id); true } catch (_: Exception) { false }
+                                            runOnUiThread {
+                                                if (!isFinishing && !isDestroyed) {
+                                                    loading.visibility = View.GONE
+                                                    if (deleted) {
+                                                        if (shownTrackId == t.id) { shownTrackId = -1L; prefs.edit().putLong("shown_track", -1L).apply() }
+                                                        refreshTrack()
+                                                        toast("Трек удалён")
+                                                    } else toast("Не удалось удалить трек")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }.show()
                 }.show()
-        }.show()
+            }
+        }
+    }
+
+    private fun mapViewportPadding(): IntArray {
+        val topPanel = findViewById<View>(R.id.topPanel)
+        val navBanner = findViewById<View>(R.id.navBanner)
+        val topHeight = listOf(topPanel, navBanner)
+            .filter { it.visibility == View.VISIBLE }
+            .maxOfOrNull { it.height } ?: 0
+        val navBar = findViewById<View>(R.id.navBar)
+        val bottomPanel = if (navBar.visibility == View.VISIBLE) navBar else findViewById(R.id.bottomDock)
+        return intArrayOf(
+            dp(48f),
+            insetTop + dp(16f) + topHeight + dp(16f),
+            dp(48f),
+            insetBottom + dp(16f) + bottomPanel.height + dp(16f)
+        )
+    }
+
+    private fun showTrackStats(track: UserDb.Track) {
+        val generation = ++listLoadGeneration
+        loadingText.text = "Считаю статистику трека…"
+        loading.visibility = View.VISIBLE
+        thread(name = "track-stats") {
+            val segments = try { userDb.trackSegments(track.id) } catch (_: Exception) { emptyList() }
+            val stats = TrackStats.calculate(segments.map { segment ->
+                segment.map { p -> TrackStats.Sample(p.lat, p.lon, p.ele, p.ts) }
+            })
+            val duration = fun(ms: Long): String {
+                val totalMinutes = (ms / 60_000L).coerceAtLeast(0L)
+                val hours = totalMinutes / 60
+                val minutes = totalMinutes % 60
+                return if (hours > 0) "${hours} ч ${minutes} мин" else "${minutes} мин"
+            }
+            val message = buildString {
+                append("Расстояние: ").append(Geo.fmtDist(stats.distanceM)).append('\n')
+                append("Точек: ").append(stats.pointCount).append('\n')
+                if (stats.elapsedMs > 0L) append("Общее время: ").append(duration(stats.elapsedMs)).append('\n')
+                if (stats.movingMs > 0L) append("Время в движении: ").append(duration(stats.movingMs)).append('\n')
+                if (stats.stoppedMs > 0L) append("Время стоянок (по GPS): ").append(duration(stats.stoppedMs)).append('\n')
+                if (stats.elevationSamples > 1) {
+                    append("Набор высоты: +").append(stats.ascentM.roundToInt()).append(" м\n")
+                    append("Сброс высоты: −").append(stats.descentM.roundToInt()).append(" м\n")
+                } else append("Высота: нет данных\n")
+                if (stats.averageSpeedKmh > 0.0) append("Средняя скорость: ").append(String.format(Locale.getDefault(), "%.1f км/ч", stats.averageSpeedKmh)).append('\n')
+                if (stats.maxSpeedKmh > 0.0) append("Максимальная скорость: ").append(String.format(Locale.getDefault(), "%.1f км/ч", stats.maxSpeedKmh))
+            }
+            runOnUiThread {
+                if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                loading.visibility = View.GONE
+                MaterialAlertDialogBuilder(this).setTitle("Статистика: ${track.name}")
+                    .setMessage(message).setPositiveButton("OK", null).show()
+            }
+        }
     }
 
     private fun fitTrack(id: Long) {
-        val pts = userDb.trackLatLng(id)
-        if (pts.size < 2) return
-        val b = LatLngBounds.Builder()
-        pts.forEach { b.include(it) }
-        try { map?.easeCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 80), 800) } catch (e: Exception) {}
+        val selectedTrackId = id
+        thread(name = "track-fit") {
+            val pts = try { userDb.trackSegments(id).flatten().map { LatLng(it.lat, it.lon) } }
+                catch (_: Exception) { emptyList() }
+            if (pts.size < 2) return@thread
+            val bounds = try {
+                LatLngBounds.Builder().apply { pts.forEach { include(it) } }.build()
+            } catch (_: Exception) { return@thread }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && shownTrackId == selectedTrackId) {
+                    findViewById<View>(R.id.root).post {
+                        if (shownTrackId != selectedTrackId || isFinishing || isDestroyed) return@post
+                        try {
+                            val p = mapViewportPadding()
+                            map?.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, p[0], p[1], p[2], p[3]), 800)
+                        } catch (_: Exception) { }
+                    }
+                }
+            }
+        }
     }
 
     // ============================================================ GPX
 
-    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+    private fun esc(s: String) = GpxXml.escapeText(s)
 
     private fun writeGpx(uri: Uri) {
-        try {
-            val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
-            val sb = StringBuilder()
-            sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-            sb.append("<gpx version=\"1.1\" creator=\"Georgia Offline Map\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
-            for (w in userDb.waypoints()) {
-                sb.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name></wpt>\n")
-            }
-            for (t in userDb.tracks()) {
-                sb.append("<trk><name>${esc(t.name)}</name><trkseg>\n")
-                for (p in userDb.trackPoints(t.id)) {
-                    sb.append("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\">")
-                    if (!p.ele.isNaN()) sb.append("<ele>${p.ele}</ele>")
-                    if (p.ts > 0) sb.append("<time>${iso.format(Date(p.ts))}</time>")
-                    sb.append("</trkpt>\n")
+        if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) {
+            toast("Остановите запись перед экспортом GPX, чтобы сохранить все точки")
+            return
+        }
+        if (!GpxTransferLock.tryBegin()) {
+            toast("Уже выполняется операция с GPX")
+            return
+        }
+        toast("Экспортирую GPX…")
+        thread(name = "gpx-export") {
+            try {
+                val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
                 }
-                sb.append("</trkseg></trk>\n")
+                val output = contentResolver.openOutputStream(uri) ?: error("Не удалось открыть файл для записи")
+                output.bufferedWriter(Charsets.UTF_8).use { out ->
+                    out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+                    out.append("<gpx version=\"1.1\" creator=\"Georgia Offline Map\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:gm=\"https://georgiamap.app/gpx/extensions/1\">\n")
+                    for (w in userDb.waypoints()) {
+                        out.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name>")
+                        if (w.note.isNotBlank()) out.append("<desc>${esc(w.note)}</desc>")
+                        if (w.category.isNotBlank()) out.append("<type>${esc(w.category)}</type>")
+                        if (w.ts > 0L) out.append("<time>${iso.format(Date(w.ts))}</time>")
+                        if (w.folder.isNotBlank() && w.folder != "Без папки") {
+                            out.append("<extensions><gm:folder>${esc(w.folder)}</gm:folder></extensions>")
+                        }
+                        out.append("</wpt>\n")
+                    }
+                    for (t in userDb.tracks()) {
+                        out.append("<trk><name>${esc(t.name)}</name>\n")
+                        for (segment in userDb.trackSegments(t.id)) {
+                            out.append("<trkseg>\n")
+                            for (p in segment) {
+                                out.append("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\">")
+                                if (!p.ele.isNaN()) out.append("<ele>${p.ele}</ele>")
+                                if (p.ts > 0) out.append("<time>${iso.format(Date(p.ts))}</time>")
+                                out.append("</trkpt>\n")
+                            }
+                            out.append("</trkseg>\n")
+                        }
+                        out.append("</trk>\n")
+                    }
+                    out.append("</gpx>\n")
+                }
+                runOnUiThread { if (!isFinishing && !isDestroyed) toast("GPX сохранён") }
+            } catch (e: Exception) {
+                runOnUiThread { if (!isFinishing && !isDestroyed) toast("Ошибка экспорта: ${e.message}") }
+            } finally {
+                GpxTransferLock.finish()
             }
-            sb.append("</gpx>\n")
-            contentResolver.openOutputStream(uri)?.use { it.write(sb.toString().toByteArray(Charsets.UTF_8)) }
-            toast("GPX сохранён")
-        } catch (e: Exception) {
-            toast("Ошибка экспорта: ${e.message}")
         }
     }
 
     private fun readGpx(uri: Uri) {
-        try {
-            val p = Xml.newPullParser()
-            var wpts = 0
-            var trks = 0
-            contentResolver.openInputStream(uri)?.use { stream ->
-                p.setInput(stream, null)
-                var inWpt = false
-                var inTrk = false
-                var inPt = false
-                var lat = 0.0
-                var lon = 0.0
-                var ele = Double.NaN
-                var name = ""
-                var trkName = "Импорт GPX"
-                val pts = ArrayList<UserDb.Pt>()
-                var ev = p.eventType
-                while (ev != XmlPullParser.END_DOCUMENT) {
-                    if (ev == XmlPullParser.START_TAG) {
-                        when (p.name) {
-                            "wpt" -> { inWpt = true; name = ""; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
-                            "trk" -> { inTrk = true; trkName = "Импорт GPX"; pts.clear() }
-                            "trkpt" -> { inPt = true; ele = Double.NaN; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
-                            "name" -> { val t = p.nextText(); if (inWpt) name = t else if (inTrk && !inPt) trkName = t }
-                            "ele" -> { val t = p.nextText(); if (inPt) ele = t.toDoubleOrNull() ?: Double.NaN }
-                        }
-                    } else if (ev == XmlPullParser.END_TAG) {
-                        when (p.name) {
-                            "wpt" -> { userDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon); inWpt = false; wpts++ }
-                            "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, 0L)); inPt = false }
-                            "trk" -> {
-                                if (pts.isNotEmpty()) { val id = userDb.newTrack(trkName); userDb.addPoints(id, pts); trks++ }
-                                inTrk = false
-                            }
+        if (TrackService.running || prefs.getLong("rec_track", 0L) > 0L) {
+            toast("Остановите запись трека перед импортом GPX")
+            return
+        }
+        if (!GpxTransferLock.tryBegin()) {
+            toast("Уже выполняется операция с GPX")
+            return
+        }
+        loadingText.text = "Импортирую GPX…"
+        loading.visibility = View.VISIBLE
+        thread(name = "gpx-import") {
+            try {
+                val parsed = contentResolver.openInputStream(uri)?.use { stream ->
+                    GpxParser.parse(stream) { count ->
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) loadingText.text = "Импорт GPX: $count точек…"
                         }
                     }
-                    ev = p.next()
+                } ?: error("Не удалось открыть GPX-файл")
+                val waypoints = parsed.waypoints.map {
+                    UserDb.Wpt(0L, it.name, it.lat, it.lon, it.timestampMs, false, it.note, it.category, it.folder)
+                }
+                val tracks = parsed.tracks.map { track ->
+                    UserDb.ImportTrack(track.name, track.points.map { point ->
+                        UserDb.Pt(point.lat, point.lon, point.elevationM, point.timestampMs, point.segment)
+                    })
+                }
+                userDb.importGpx(waypoints, tracks)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loading.visibility = View.GONE
+                        refreshWaypoints()
+                        refreshTrack()
+                        toast("Импортировано: точек ${waypoints.size}, треков ${tracks.size}")
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("Ошибка импорта: ${e.message}")
+                    }
+                }
+            } finally {
+                GpxTransferLock.finish()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) loading.visibility = View.GONE
                 }
             }
-            refreshWaypoints()
-            toast("Импортировано: точек $wpts, треков $trks")
-        } catch (e: Exception) {
-            toast("Ошибка импорта: ${e.message}")
         }
     }
 
-    // ============================================================ phrasebook, info, diagnostics
+    // ============================================================ help and diagnostics
 
     private fun showInfo() {
-        val msg = "Экстренные службы: 112 (единый номер).\n\n" +
+        val emergencyInfo = mapPackage.emergencyNumber?.let {
+            "Экстренный номер региона «${mapPackage.title}»: $it.\n\n"
+        } ?: "Экстренный номер для региона «${mapPackage.title}» не указан в пакете карт. Уточните его заранее.\n\n"
+        val msg = emergencyInfo +
             "Карта, поиск и рельеф работают без интернета. GPS тоже работает без сети.\n\n" +
             "Горные дороги и перевалы (Омало, Ушгули, Абано и др.) зимой могут быть закрыты — на карте это не отражено. " +
             "Перед выездом уточняйте обстановку на месте.\n\n" +
-            "Запись трека (кнопка «Запись» в меню) сохраняет ваш путь по GPS: линию на карте, длину и точки. " +
-            "Остановив запись, найдёте трек в Меню → «Мои данные» → «Мои треки». " +
-            "Для долгой записи разрешите приложению работу в фоне и не закрывайте уведомление.\n\n" +
+            "Навигатор строит офлайн-маршруты на автомобиле, пешком, в режиме похода и на велосипеде. Можно выбрать маршрут быстрее или короче. Учитываются односторонние дороги и ограничения доступа по видам движения; запрещающие повороты, условные ограничения, пробки и сезонные закрытия дорог не учитываются. Режим похода предпочитает тропы, но сам выбор маршрута не исключает крутые уклоны; профиль высот по ЦМР показывает рельеф, но не состояние троп, лавинную опасность и фактическую проходимость.\n\n" +
+            "Запись трека (кнопка справа на главном экране) сохраняет ваш путь по GPS. Видимость кнопки настраивается в Меню → «Мои данные». " +
+            "Остановив запись, найдёте трек в Меню → «Мои данные» → «Мои треки». Для долгой записи разрешите работу в фоне и не закрывайте уведомление.\n\n" +
+            "GPX: импорт и экспорт сохранённых точек и треков, включая отдельные сегменты и временные отметки. В «Мои треки» доступна статистика расстояния, набора/сброса высоты и скорости.\n\n" +
+            "Экспедиция и безопасность: проверка свежести GPS, копирование и отправка координат, памятка перед выходом и региональный экстренный номер (если он указан в пакете). Кнопка вызова открывает номеронабиратель, а не звонит автоматически.\n\n" +
             "Компас: направление на север, на Мекку (кибла) или на любой пункт по названию; нужен датчик ориентации, GPS или центр карты задают вашу позицию.\n\n" +
             "Данные: © участники OpenStreetMap (ODbL), схема OpenMapTiles, Natural Earth, рельеф — AWS Terrain Tiles. " +
             "Данные актуальны на дату сборки APK."
@@ -1261,58 +2362,80 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDiagnostics() {
-        val sb = StringBuilder()
-        val t = tilesFile
-        if (t != null && t.exists()) {
-            sb.append("georgia.mbtiles: ${t.length() shr 20} МБ\n")
-            try {
-                val db = SQLiteDatabase.openDatabase(t.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
-                db.rawQuery("select name,value from metadata where name in ('minzoom','maxzoom','bounds','format')", null).use {
-                    while (it.moveToNext()) sb.append("  ${it.getString(0)} = ${it.getString(1)}\n")
-                }
-                val zs = StringBuilder()
-                db.rawQuery("select zoom_level,count(*) from tiles group by 1 order by 1", null).use {
-                    while (it.moveToNext()) zs.append("z${it.getInt(0)}:${it.getInt(1)} ")
-                }
-                sb.append("  тайлы: $zs\n")
-                db.close()
-            } catch (e: Exception) { sb.append("  ошибка чтения: $e\n") }
-        } else sb.append("georgia.mbtiles: нет\n")
-        sb.append("places.db: ").append(placeDb?.count()?.toString() ?: "нет").append(" мест\n")
-        sb.append("relief: ").append(if (elevation != null) "есть" else "нет").append("\n")
-        File(filesDir, "contours.mbtiles").let { sb.append("contours.mbtiles (линии высот): ").append(if (it.exists()) "${it.length() shr 20} МБ" else "нет").append("\n") }
-        sb.append("значки на карте: ").append(markImages().size).append(" из ").append(PoiCats.IMAGES.size).append("\n")
-        try {
-            val files = assets.list("glyphs/NotoSans")?.size ?: 0
-            sb.append("шрифты (glyphs) в APK: $files файлов\n")
-            // a real font has many glyphs with ink in these ranges; a placeholder has almost none
-            for ((f, name, need) in listOf(
-                Triple("0-255", "латиница", 150), Triple("1024-1279", "кириллица", 200), Triple("4096-4351", "грузинский", 45)
-            )) {
-                val bytes = try { assets.open("glyphs/NotoSans/$f.pbf").use { it.readBytes() } } catch (e: Exception) { null }
-                if (bytes == null) { sb.append("  $name: файла нет ✗\n"); continue }
-                val ink = glyphsWithInk(bytes)
-                sb.append("  $name ($f): $ink глифов ${if (ink >= need) "✓" else "✗ (заглушка, не шрифт)"}\n")
-            }
-        } catch (e: Exception) { sb.append("шрифты: ошибка $e\n") }
+        val generation = ++diagnosticsGeneration
+        val progress = MaterialAlertDialogBuilder(this).setMessage("Проверяю данные карты…")
+            .setNegativeButton("Отмена") { _, _ -> diagnosticsGeneration++ }.create()
+        progress.setOnCancelListener { if (generation == diagnosticsGeneration) diagnosticsGeneration++ }
+        progress.show()
 
+        val tileFile = tilesFile
+        val reliefPresent = elevation != null
+        val contoursFile = mapPackage.contoursAsset?.let { mapPackage.file(filesDir, it) }
+        val iconCount = markImages().size
+        val rendered = ArrayList<Pair<String, Int>>()
         val m = map
-        val v = mapView
         if (m != null && style != null) {
-            sb.append("\nОтрисованные объекты на экране:\n")
-            val rect = RectF(0f, 0f, v.width.toFloat(), v.height.toFloat())
+            val rect = RectF(0f, 0f, mapView.width.toFloat(), mapView.height.toFloat())
             for (id in listOf("water", "landcover-wood", "landuse-residential", "road-primary", "road-minor",
                 "road-path", "building", "boundary-2", "boundary-4", "lbl-city", "lbl-town", "lbl-village", "lbl-peak", "lbl-road-major")) {
-                val n = try { m.queryRenderedFeatures(rect, id).size } catch (e: Exception) { -1 }
-                sb.append("  $id: $n\n")
+                rendered.add(id to try { m.queryRenderedFeatures(rect, id).size } catch (_: Exception) { -1 })
             }
         }
-        if (errors.isNotEmpty()) {
-            sb.append("\nОшибки загрузки:\n")
-            errors.takeLast(6).forEach { sb.append("  $it\n") }
+        val errorsSnapshot = errors.takeLast(6)
+
+        thread(name = "map-diagnostics") {
+            val sb = StringBuilder()
+            if (tileFile != null && tileFile.exists()) {
+                sb.append("${mapPackage.tilesAsset}: ${tileFile.length() shr 20} МБ\n")
+                var db: SQLiteDatabase? = null
+                try {
+                    db = SQLiteDatabase.openDatabase(tileFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+                    db.rawQuery("select name,value from metadata where name in ('minzoom','maxzoom','bounds','format')", null).use {
+                        while (it.moveToNext()) sb.append("  ${it.getString(0)} = ${it.getString(1)}\n")
+                    }
+                    val zs = StringBuilder()
+                    db.rawQuery("select zoom_level,count(*) from tiles group by 1 order by 1", null).use {
+                        while (it.moveToNext()) zs.append("z${it.getInt(0)}:${it.getInt(1)} ")
+                    }
+                    sb.append("  тайлы: $zs\n")
+                } catch (e: Exception) { sb.append("  ошибка чтения: $e\n") }
+                finally { db?.close() }
+            } else sb.append("${mapPackage.tilesAsset}: нет\n")
+
+            sb.append("${mapPackage.placesAsset ?: "Поиск"}: ").append(try { placeDb?.count()?.toString() ?: "нет" } catch (_: Exception) { "ошибка" }).append(" мест\n")
+            sb.append("relief: ").append(if (reliefPresent) "есть" else "нет").append("\n")
+            val contoursSizeMb = contoursFile?.takeIf { it.exists() }?.length()?.shr(20)
+            sb.append("${mapPackage.contoursAsset ?: "Линии высот"}: ")
+                .append(contoursSizeMb?.let { "$it МБ" } ?: "нет").append("\n")
+            sb.append("значки на карте: ").append(iconCount).append(" из ").append(PoiCats.IMAGES.size).append("\n")
+            try {
+                val files = assets.list("glyphs/NotoSans")?.size ?: 0
+                sb.append("шрифты (glyphs) в APK: $files файлов\n")
+                for ((f, name, need) in listOf(
+                    Triple("0-255", "латиница", 150), Triple("1024-1279", "кириллица", 200), Triple("4096-4351", "грузинский", 45)
+                )) {
+                    val bytes = try { assets.open("glyphs/NotoSans/$f.pbf").use { it.readBytes() } } catch (_: Exception) { null }
+                    if (bytes == null) { sb.append("  $name: файла нет ✗\n"); continue }
+                    val ink = glyphsWithInk(bytes)
+                    sb.append("  $name ($f): $ink глифов ${if (ink >= need) "✓" else "✗ (заглушка, не шрифт)"}\n")
+                }
+            } catch (e: Exception) { sb.append("шрифты: ошибка $e\n") }
+
+            if (rendered.isNotEmpty()) {
+                sb.append("\nОтрисованные объекты на экране:\n")
+                rendered.forEach { (id, count) -> sb.append("  $id: $count\n") }
+            }
+            if (errorsSnapshot.isNotEmpty()) {
+                sb.append("\nОшибки загрузки:\n")
+                errorsSnapshot.forEach { sb.append("  $it\n") }
+            }
+            runOnUiThread {
+                if (generation != diagnosticsGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                MaterialAlertDialogBuilder(this).setTitle("Диагностика").setMessage(sb.toString())
+                    .setPositiveButton("OK", null).show()
+            }
         }
-        MaterialAlertDialogBuilder(this).setTitle("Диагностика").setMessage(sb.toString())
-            .setPositiveButton("OK", null).show()
     }
 
     /** Number of glyphs that have a bitmap in an SDF glyph file (glyphs.proto). */
@@ -1364,10 +2487,10 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ navigator (offline road routing)
 
-    private fun profileName(p: Int) = when (p) { Profile.FOOT -> "Пешком"; Profile.BIKE -> "На велосипеде"; else -> "На авто" }
+    private fun profileName(p: Int) = when (p) { Profile.FOOT -> "Пешком"; Profile.HIKE -> "Поход"; Profile.BIKE -> "На велосипеде"; else -> "На авто" }
 
     private fun showNavProfileDialog() {
-        val ps = listOf(Profile.CAR, Profile.FOOT, Profile.BIKE)
+        val ps = listOf(Profile.CAR, Profile.FOOT, Profile.HIKE, Profile.BIKE)
         MaterialAlertDialogBuilder(this).setTitle("Транспорт по умолчанию")
             .setSingleChoiceItems(ps.map { profileName(it) }.toTypedArray(), ps.indexOf(navProfile)) { d, which ->
                 navProfile = ps[which]
@@ -1377,8 +2500,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** "Route from here": the selected place becomes the start, the destination is chosen next. */
+    private fun clearPendingFrom() {
+        pendingFrom = null
+        pendingFromName = ""
+        src("ovl-sel")?.setGeoJson(Geo.pointFc(emptyList()))
+    }
+
     private fun routeFromHere() {
         val here = navDest ?: return
+        routeRequestId++ // invalidate any preview calculation before changing the route origin
         pendingFrom = here
         pendingFromName = navDestName
         src("ovl-sel")?.setGeoJson(Geo.pointFc(listOf(here)))
@@ -1394,26 +2524,21 @@ class MainActivity : AppCompatActivity() {
         }
         val items = arrayOf("Точку на карте", "В одну из моих точек", "По координатам", "Найти место через поиск")
         MaterialAlertDialogBuilder(this).setTitle(title).setOnCancelListener {
-            if (fromMode) { pendingFrom = null; src("ovl-sel")?.setGeoJson(Geo.pointFc(emptyList())) }
+            if (fromMode) clearPendingFrom()
         }.setItems(items) { _, i ->
             when (i) {
                 0 -> map?.cameraPosition?.target?.let { setDestination(it, Geo.fmtCoord(it.latitude, it.longitude)) }
-                1 -> {
-                    val list = userDb.waypoints()
-                    if (list.isEmpty()) toast("Сохранённых точек нет")
-                    else MaterialAlertDialogBuilder(this).setTitle("Куда").setItems(list.map { it.name }.toTypedArray()) { _, k ->
-                        setDestination(LatLng(list[k].lat, list[k].lon), list[k].name)
-                    }.show()
-                }
+                1 -> showRouteWaypointChooser(fromMode)
                 2 -> {
                     val et = EditText(this)
                     et.hint = "41.7151, 44.8271"
                     MaterialAlertDialogBuilder(this).setTitle("Широта, долгота").setView(et)
+                        .setOnCancelListener { if (fromMode) clearPendingFrom() }
                         .setPositiveButton("Маршрут") { _, _ ->
                             val ll = Geo.parseCoord(et.text.toString())
                             if (ll == null) toast("Не удалось разобрать координаты")
                             else setDestination(ll, Geo.fmtCoord(ll.latitude, ll.longitude))
-                        }.setNegativeButton("Отмена", null).show()
+                        }.setNegativeButton("Отмена") { _, _ -> if (fromMode) clearPendingFrom() }.show()
                 }
                 else -> {
                     if (fromMode) toast("Найдите место и нажмите на результат")
@@ -1424,14 +2549,51 @@ class MainActivity : AppCompatActivity() {
         }.show()
     }
 
+    private fun showRouteWaypointChooser(fromMode: Boolean) {
+        val generation = ++listLoadGeneration
+        val progress = MaterialAlertDialogBuilder(this).setMessage("Загружаю сохранённые точки…")
+            .setNegativeButton("Отмена") { _, _ ->
+                listLoadGeneration++
+                if (fromMode) clearPendingFrom()
+            }.create()
+        progress.setOnCancelListener {
+            if (generation == listLoadGeneration) listLoadGeneration++
+            if (fromMode) clearPendingFrom()
+        }
+        progress.show()
+        thread(name = "route-waypoints") {
+            val list = try { userDb.waypoints() } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                if (generation != listLoadGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                if (list.isEmpty()) {
+                    toast("Сохранённых точек нет")
+                    if (fromMode) clearPendingFrom()
+                } else {
+                    MaterialAlertDialogBuilder(this).setTitle("Куда")
+                        .setOnCancelListener { if (fromMode) clearPendingFrom() }
+                        .setItems(list.map { it.name }.toTypedArray()) { _, k ->
+                            setDestination(LatLng(list[k].lat, list[k].lon), list[k].name)
+                        }.show()
+                }
+            }
+        }
+    }
+
     private fun setDestination(ll: LatLng, name: String) {
         if (navMode == NavMode.ACTIVE) return
+        routeRequestId++ // discard a route calculation for the previously selected destination
         navDest = ll
         navDestName = name
         session = null
         src("ovl-route")?.setGeoJson(Geo.lineFc(emptyList()))
         src("ovl-dest")?.setGeoJson(Geo.pointFc(listOf(ll)))
         navMode = NavMode.PLACE
+        if (etSearch.text?.isNotEmpty() == true) {
+            etSearch.setText("")
+            etSearch.clearFocus()
+        }
+        showResults(false)
         updateNavUi()
         if (pendingFrom != null) planRoute()
     }
@@ -1440,6 +2602,72 @@ class MainActivity : AppCompatActivity() {
         navProfile = p
         prefs.edit().putInt("nav_profile", p).apply()
         if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
+    }
+
+    private fun routePreferenceName(value: Int) =
+        if (value == RoutePreference.SHORTEST) "Короче" else "Быстрее"
+
+    private fun showRoutePreferenceDialog() {
+        val values = arrayOf("Быстрее", "Короче")
+        MaterialAlertDialogBuilder(this).setTitle("Предпочтение маршрута")
+            .setSingleChoiceItems(values, routePreference) { dialog, which ->
+                routePreference = which
+                prefs.edit().putInt("route_preference", which).apply()
+                dialog.dismiss()
+                if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
+            }
+            .setNegativeButton("Закрыть", null).show()
+    }
+
+    private fun trackAutoPauseSummary(): String =
+        if (prefs.getBoolean("track_auto_pause", true)) "Включена" else "Выключена"
+
+    private fun showTrackAutoPauseDialog() {
+        val enabled = prefs.getBoolean("track_auto_pause", true)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Автопауза записи трека")
+            .setMessage("При стоянке примерно от 2 минут запись приостанавливается. При возобновлении движения создаётся новый сегмент, чтобы GPS-дрейф не добавлял ложное расстояние. Настройка действует для следующей записи.")
+            .setSingleChoiceItems(arrayOf("Включена", "Выключена"), if (enabled) 0 else 1) { dialog, which ->
+                prefs.edit().putBoolean("track_auto_pause", which == 0).apply()
+                dialog.dismiss()
+                toast(if (which == 0) "Автопауза включена для следующей записи" else "Автопауза выключена для следующей записи")
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun routeAvoidanceSummary(): String {
+        val labels = ArrayList<String>()
+        if ((routeAvoidance and RouteAvoidance.UNPAVED) != 0) labels.add("грунтовки")
+        if ((routeAvoidance and RouteAvoidance.STEPS) != 0) labels.add("лестницы")
+        if ((routeAvoidance and RouteAvoidance.DIFFICULT_TRAILS) != 0) labels.add("сложные тропы")
+        if ((routeAvoidance and RouteAvoidance.TOLLS) != 0) labels.add("платные дороги")
+        return labels.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Без ограничений"
+    }
+
+    private fun showRouteAvoidanceDialog() {
+        val flags = intArrayOf(
+            RouteAvoidance.UNPAVED, RouteAvoidance.STEPS, RouteAvoidance.DIFFICULT_TRAILS, RouteAvoidance.TOLLS
+        )
+        val labels = arrayOf("Грунтовые и неасфальтированные дороги",
+            "Лестницы и ступенчатые проходы", "Тропы с плохим состоянием или высоким tracktype",
+            "Платные дороги")
+        val checked = BooleanArray(flags.size) { i -> (routeAvoidance and flags[i]) != 0 }
+        var selected = routeAvoidance
+        MaterialAlertDialogBuilder(this)
+            .setTitle("По возможности избегать")
+            .setMessage("Это предпочтения, а не абсолютные запреты. Если обхода нет, маршрут может включать такие участки и покажет предупреждение.")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                selected = if (isChecked) selected or flags[which] else selected and flags[which].inv()
+            }
+            .setPositiveButton("Применить") { _, _ ->
+                routeAvoidance = selected and RouteAvoidance.ALL
+                prefs.edit().putInt("route_avoidance", routeAvoidance).apply()
+                if (navMode == NavMode.PREVIEW) planRoute() else updateNavUi()
+                if (navMode == NavMode.ACTIVE) toast("Ограничения применятся при следующем пересчёте маршрута")
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun fmtDur(sec: Double): String {
@@ -1459,10 +2687,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun setSummary(remM: Double, remS: Double, note: String = "") {
         findViewById<TextView>(R.id.navMain).text = Geo.fmtDist(remM) + " · " + fmtDur(remS)
+        val terrainStatus = when {
+            routeAnalysisBusy -> " · анализ высот…"
+            routeAnalysisResult?.difficulty == RouteAnalysis.Difficulty.HARD -> " · ⚠ сложный рельеф · профиль ↗"
+            routeAnalysisResult?.difficulty == RouteAnalysis.Difficulty.MODERATE -> " · умеренный рельеф · профиль ↗"
+            routeAnalysisResult?.coveragePct?.let { it < 80 } == true -> " · ⚠ неполные высотные данные · профиль ↗"
+            routeAnalysisResult?.steepSections?.isNotEmpty() == true ->
+                " · крутые участки: " + routeAnalysisResult!!.steepSections.size + " · профиль ↗"
+            routeAnalysisResult?.hasElevation == true -> " · профиль высот ↗"
+            routeAnalysisResult != null -> " · рельеф частично недоступен ↗"
+            elevation == null -> " · нет данных рельефа ↗"
+            else -> " · профиль высот ↗"
+        }
+        val avoidanceWarnings = session?.route?.warnings.orEmpty()
         findViewById<TextView>(R.id.navSub).text = "Прибытие в " + fmtEta(remS) + " · " + profileName(navProfile) +
+            " · " + routePreferenceName(routePreference) +
+            (if (routeAvoidance != RouteAvoidance.NONE) " · избегает: " + routeAvoidanceSummary() else "") +
             (if (pendingFrom != null) "\nот «$pendingFromName»" else "") +
             (if (navDestName.isNotBlank()) "\n→ $navDestName" else "") +
-            (if (note.isNotEmpty()) "\n$note" else "")
+            (if (note.isNotEmpty()) "\n$note" else "") +
+            (if (avoidanceWarnings.isNotEmpty()) "\n⚠ " + avoidanceWarnings.joinToString("; ") else "") +
+            terrainStatus
     }
 
     /** When there is no road next to a point, the nearest one is used: say how far it is. */
@@ -1477,6 +2722,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateNavUi() {
         val mode = navMode
         val active = mode == NavMode.ACTIVE
+        showResults(lvResults.visibility == View.VISIBLE)
         findViewById<View>(R.id.navBanner).visibility = if (active) View.VISIBLE else View.GONE
         findViewById<View>(R.id.topPanel).visibility = if (active) View.GONE else View.VISIBLE
         val bar = findViewById<View>(R.id.navBar)
@@ -1495,12 +2741,18 @@ class MainActivity : AppCompatActivity() {
         // a chosen place offers "route here" / "route from here"; the single big button is for preview and guidance
         findViewById<View>(R.id.navPlaceActions).visibility = if (mode == NavMode.PLACE) View.VISIBLE else View.GONE
         go.visibility = if (mode == NavMode.PLACE) View.GONE else View.VISIBLE
-        listOf(R.id.navProfCar to Profile.CAR, R.id.navProfFoot to Profile.FOOT, R.id.navProfBike to Profile.BIKE).forEach { (id, p) ->
+        listOf(R.id.navProfCar to Profile.CAR, R.id.navProfFoot to Profile.FOOT, R.id.navProfHike to Profile.HIKE, R.id.navProfBike to Profile.BIKE).forEach { (id, p) ->
             val v = findViewById<TextView>(id)
             val sel = p == navProfile
             v.setBackgroundResource(if (sel) R.drawable.bg_chip_selected else R.drawable.bg_chip)
             v.setTextColor(themeColorInt(if (sel) R.attr.gmOnAccentContainer else R.attr.gmTextSecondary))
         }
+        val navSub = findViewById<TextView>(R.id.navSub)
+        navSub.isClickable = mode == NavMode.PREVIEW
+        navSub.isFocusable = mode == NavMode.PREVIEW
+        navSub.setOnClickListener(if (mode == NavMode.PREVIEW) View.OnClickListener {
+            showRouteAnalysisDialog()
+        } else null)
         when (mode) {
             NavMode.PLACE -> {
                 findViewById<TextView>(R.id.navMain).text = navDestName
@@ -1509,7 +2761,9 @@ class MainActivity : AppCompatActivity() {
             NavMode.PREVIEW -> session?.let { setSummary(it.totalM, it.route.timeS, offRoadNote(it.route)) }
             else -> {}
         }
-        bar.post { updateControlsMargin() }
+        refreshRuler()
+        updateFloatingControls()
+        bar.post { updateControlsMargin(); applyMapUiMargins() }
     }
 
     private fun planRoute() {
@@ -1526,38 +2780,277 @@ class MainActivity : AppCompatActivity() {
                 .setNegativeButton("Отмена", null).show()
             return
         }
-        computeRoute(from, dest, false) { r, err ->
-            if (r == null) {
+        val gap = FloatArray(1)
+        Location.distanceBetween(from.latitude, from.longitude, dest.latitude, dest.longitude, gap)
+        if (gap[0] < 2f) {
+            toast("Вы уже у пункта назначения — маршрут не требуется")
+            return
+        }
+        computeRouteOptions(from, dest) { fastest, shortest, err ->
+            val preferred = if (routePreference == RoutePreference.FASTEST) fastest else shortest
+            val alternative = if (routePreference == RoutePreference.FASTEST) shortest else fastest
+            if (preferred == null && alternative == null) {
                 toast(err ?: "Маршрут не найден")
                 updateNavUi()
-                return@computeRoute
+                return@computeRouteOptions
             }
-            session = NavSession(r, navProfile)
-            drawRoute(r)
-            fitRoute(r)
-            navMode = NavMode.PREVIEW
-            updateNavUi()
+            if (preferred == null || alternative == null || !routesMeaningfullyDifferent(preferred, alternative)) {
+                showRoutePreview(preferred ?: alternative!!)
+                return@computeRouteOptions
+            }
+
+            val options = if (routePreference == RoutePreference.FASTEST)
+                listOf(fastest!!, shortest!!) else listOf(shortest!!, fastest!!)
+            val labels = if (routePreference == RoutePreference.FASTEST)
+                arrayOf(routeOptionLabel("Быстрее", options[0]), routeOptionLabel("Короче", options[1]))
+            else arrayOf(routeOptionLabel("Короче", options[0]), routeOptionLabel("Быстрее", options[1]))
+            MaterialAlertDialogBuilder(this).setTitle("Выберите маршрут")
+                .setItems(labels) { _, index -> showRoutePreview(options[index]) }
+                .setNegativeButton("Отмена") { _, _ -> updateNavUi() }
+                .setOnCancelListener { updateNavUi() }
+                .show()
         }
     }
 
-    /** Runs the search on a worker thread (the road graph is loaded from routing.bin on first use). */
-    private fun computeRoute(from: LatLng, to: LatLng, silent: Boolean, done: (RouteResult?, String?) -> Unit) {
-        val f = File(filesDir, "routing.bin")
-        if (!f.exists()) {
-            done(null, "В приложении нет дорожных данных (routing.bin). Пересоберите APK.")
+    /** Calculates fastest and shortest candidates so the user can choose a genuinely different route. */
+    private fun computeRouteOptions(
+        from: LatLng, to: LatLng,
+        done: (fastest: RouteResult?, shortest: RouteResult?, error: String?) -> Unit
+    ) {
+        val requestId = ++routeRequestId
+        val f = mapPackage.routingAsset?.let { mapPackage.file(filesDir, it) }
+        if (f == null || !f.isFile) {
+            if (requestId == routeRequestId) done(null, null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
             return
         }
         val profile = navProfile
+        val avoidance = routeAvoidance
+        findViewById<TextView>(R.id.navSub).text =
+            if (graph == null) "Загружаю дорожные данные…" else "Ищу варианты маршрута…"
+        thread(name = "routing-options") {
+            try {
+                val g = graph ?: synchronized(this@MainActivity) {
+                    graph ?: RandomAccessFile(f, "r").use { raf ->
+                        RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
+                    }.also { graph = it }
+                }
+                val fastest = g.route(from.latitude, from.longitude, to.latitude, to.longitude,
+                    profile, RoutePreference.FASTEST, avoidance)
+                val shortest = g.route(from.latitude, from.longitude, to.latitude, to.longitude,
+                    profile, RoutePreference.SHORTEST, avoidance)
+                runOnUiThread {
+                    if (requestId == routeRequestId && !isFinishing && !isDestroyed) {
+                        done(fastest, shortest,
+                            if (fastest == null && shortest == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null)
+                    }
+                }
+            } catch (e: Throwable) {
+                runOnUiThread {
+                    if (requestId == routeRequestId && !isFinishing && !isDestroyed)
+                        done(null, null, "Ошибка маршрутизации: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun showRoutePreview(route: RouteResult) {
+        routeAnalysisGeneration++
+        routeAnalysisBusy = false
+        routeAnalysisResult = null
+        session = NavSession(route, navProfile)
+        drawRoute(route)
+        fitRoute(route)
+        navMode = NavMode.PREVIEW
+        updateNavUi()
+        startRouteTerrainAnalysis(route)
+    }
+
+    /** Reads the offline DEM away from the UI thread and caps work for very long routes. */
+    private fun startRouteTerrainAnalysis(route: RouteResult) {
+        val db = elevation
+        if (db == null || route.pointCount < 2) {
+            routeAnalysisBusy = false
+            routeAnalysisResult = null
+            updateNavUi()
+            return
+        }
+        val generation = ++routeAnalysisGeneration
+        routeAnalysisBusy = true
+        updateNavUi()
+        thread(name = "route-terrain-analysis") {
+            val result = try {
+                val points = (0 until route.pointCount).map { i ->
+                    RouteAnalysis.Point(route.lat(i), route.lon(i))
+                }
+                val samples = RouteAnalysis.sample(points, spacingM = 50.0, maxSamples = 240) { lat, lon ->
+                    db.at(lat, lon)?.toDouble()
+                }
+                RouteAnalysis.calculate(samples, route.distanceM)
+            } catch (_: Exception) {
+                null
+            }
+            runOnUiThread {
+                if (generation != routeAnalysisGeneration || navMode != NavMode.PREVIEW ||
+                    isFinishing || isDestroyed) return@runOnUiThread
+                routeAnalysisBusy = false
+                routeAnalysisResult = result
+                updateNavUi()
+            }
+        }
+    }
+
+    private fun showRouteAnalysisDialog() {
+        if (routeAnalysisBusy) {
+            toast("Рассчитываю профиль высот…")
+            return
+        }
+        val result = routeAnalysisResult
+        if (result == null || !result.hasElevation) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Профиль высот")
+                .setMessage(
+                    if (elevation == null) "В этом пакете карты нет офлайн-данных рельефа."
+                    else "Не удалось получить достаточно высотных данных для этого маршрута. Возможно, участок находится вне покрытия модели рельефа."
+                )
+                .setPositiveButton("Закрыть", null)
+                .show()
+            return
+        }
+
+        val density = resources.displayMetrics.density
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((18 * density).toInt(), (8 * density).toInt(),
+                (18 * density).toInt(), (8 * density).toInt())
+        }
+        val range = if (result.minElevationM != null && result.maxElevationM != null)
+            "${result.minElevationM.roundToInt()}–${result.maxElevationM.roundToInt()} м"
+        else "нет данных"
+        val difficulty = when (result.difficulty) {
+            RouteAnalysis.Difficulty.EASY -> "Небольшой рельеф"
+            RouteAnalysis.Difficulty.MODERATE -> "Умеренно сложный рельеф"
+            RouteAnalysis.Difficulty.HARD -> "Сложный рельеф"
+            RouteAnalysis.Difficulty.UNKNOWN -> "Недостаточно данных"
+        }
+        val summary = buildString {
+            append("Высота: ").append(range).append("\n")
+            append("Набор: +").append(result.ascentM.roundToInt()).append(" м")
+            append("   Сброс: −").append(result.descentM.roundToInt()).append(" м\n")
+            result.maxUphillGradePct?.let { append("Максимальный подъём: ").append(it.roundToInt()).append("%\n") }
+            result.maxDownhillGradePct?.let { append("Максимальный спуск: ").append(it.roundToInt()).append("%\n") }
+            append("Оценка рельефа: ").append(difficulty).append("\n")
+            append("Покрытие высотными данными: ").append(result.coveragePct).append("%")
+        }
+        content.addView(android.widget.TextView(this).apply {
+            text = summary
+            textSize = 15f
+            setTextColor(themeColorInt(R.attr.gmTextPrimary))
+        })
+        session?.route?.warnings?.takeIf { it.isNotEmpty() }?.let { warnings ->
+            content.addView(android.widget.TextView(this).apply {
+                text = "Предупреждения маршрута:\n" + warnings.joinToString("\n")
+                textSize = 13f
+                setTextColor(themeColorInt(R.attr.gmTextPrimary))
+                setPadding(0, (8 * density).toInt(), 0, 0)
+            })
+        }
+        content.addView(RouteElevationProfileView(this).apply {
+            setProfile(result)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (190 * density).toInt()
+            ).apply { topMargin = (8 * density).toInt() }
+        })
+        if (result.steepSections.isNotEmpty()) {
+            val steepText = result.steepSections.take(5).joinToString("\n") { section ->
+                val direction = if (section.uphill) "подъём" else "спуск"
+                "$direction ${section.fromM.roundToInt()}–${section.toM.roundToInt()} м: " +
+                    "${section.averageGradePct.roundToInt()}%"
+            }
+            content.addView(android.widget.TextView(this).apply {
+                text = "Крутые участки (от 12%):\n$steepText"
+                textSize = 14f
+                setTextColor(themeColorInt(R.attr.gmTextPrimary))
+                setPadding(0, (10 * density).toInt(), 0, 0)
+            })
+        }
+        content.addView(android.widget.TextView(this).apply {
+            text = "\nОценка сложности — ориентировочная эвристика только по высотному профилю. Она не определяет состояние троп, осыпи, лавинную опасность, погоду или фактическую проходимость. При покрытии высотными данными ниже 80% оценка сложности не выдаётся. Используйте результат как ориентир, а не гарантию безопасности."
+            textSize = 12f
+            setTextColor(themeColorInt(R.attr.gmTextSecondary))
+        })
+        val scroll = android.widget.ScrollView(this).apply { addView(content) }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Профиль высот маршрута")
+            .setView(scroll)
+            .setPositiveButton("Закрыть", null)
+            .show()
+    }
+
+    private fun routeOptionLabel(label: String, route: RouteResult): String {
+        val minutes = kotlin.math.ceil(route.timeS.coerceAtLeast(0.0) / 60.0).toInt()
+        val duration = if (minutes >= 60) "${minutes / 60} ч ${minutes % 60} мин" else "${minutes} мин"
+        return "$label · ${Geo.fmtDist(route.distanceM)} · $duration"
+    }
+
+    private fun routesMeaningfullyDifferent(a: RouteResult, b: RouteResult): Boolean {
+        if (kotlin.math.abs(a.distanceM - b.distanceM) > maxOf(150.0, minOf(a.distanceM, b.distanceM) * 0.05))
+            return true
+        fun pointAt(route: RouteResult, fraction: Double): LatLng {
+            if (route.pointCount <= 1) return LatLng(route.lat(0), route.lon(0))
+            val cumulative = DoubleArray(route.pointCount)
+            for (i in 1 until route.pointCount) {
+                cumulative[i] = cumulative[i - 1] + RouteAnalysis.distance(
+                    RouteAnalysis.Point(route.lat(i - 1), route.lon(i - 1)),
+                    RouteAnalysis.Point(route.lat(i), route.lon(i))
+                )
+            }
+            val target = cumulative.last() * fraction
+            val index = (1 until route.pointCount).firstOrNull { cumulative[it] >= target } ?: route.pointCount - 1
+            val length = cumulative[index] - cumulative[index - 1]
+            val t = if (length > 0.0) ((target - cumulative[index - 1]) / length).coerceIn(0.0, 1.0) else 0.0
+            return LatLng(
+                route.lat(index - 1) + (route.lat(index) - route.lat(index - 1)) * t,
+                ((route.lon(index - 1) + (((route.lon(index) - route.lon(index - 1) + 540.0) % 360.0) - 180.0) * t + 540.0) % 360.0) - 180.0
+            )
+        }
+        return listOf(0.25, 0.5, 0.75).any { fraction ->
+            val p = pointAt(a, fraction)
+            val q = pointAt(b, fraction)
+            val distance = FloatArray(1)
+            Location.distanceBetween(p.latitude, p.longitude, q.latitude, q.longitude, distance)
+            distance[0] > 100f
+        }
+    }
+
+    /** Runs the search on a worker thread (the road graph is loaded from the selected package on first use). */
+    private fun computeRoute(from: LatLng, to: LatLng, silent: Boolean, done: (RouteResult?, String?) -> Unit) {
+        val requestId = ++routeRequestId
+        val f = mapPackage.routingAsset?.let { mapPackage.file(filesDir, it) }
+        if (f == null || !f.isFile) {
+            if (requestId == routeRequestId) done(null, "В пакете «${mapPackage.title}» нет дорожных данных для навигации.")
+            return
+        }
+        val profile = navProfile
+        val preference = routePreference
+        val avoidance = routeAvoidance
         if (!silent) findViewById<TextView>(R.id.navSub).text = if (graph == null) "Загружаю дорожные данные…" else "Строю маршрут…"
         thread(name = "routing") {
             try {
-                val g = graph ?: RandomAccessFile(f, "r").use { raf ->
-                    RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
-                }.also { graph = it }
-                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile)
-                runOnUiThread { done(r, if (r == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null) }
+                val g = graph ?: synchronized(this@MainActivity) {
+                    graph ?: RandomAccessFile(f, "r").use { raf ->
+                        RoadGraph(raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()))
+                    }.also { graph = it }
+                }
+                val r = g.route(from.latitude, from.longitude, to.latitude, to.longitude, profile, preference, avoidance)
+                runOnUiThread {
+                    if (requestId == routeRequestId && !isFinishing && !isDestroyed) {
+                        done(r, if (r == null) "Маршрут не найден: рядом нет подходящей дороги или нет связи между точками" else null)
+                    }
+                }
             } catch (e: Throwable) {
-                runOnUiThread { done(null, "Ошибка маршрутизации: ${e.message}") }
+                runOnUiThread {
+                    if (requestId == routeRequestId && !isFinishing && !isDestroyed) done(null, "Ошибка маршрутизации: ${e.message}")
+                }
             }
         }
     }
@@ -1567,6 +3060,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun fitRoute(r: RouteResult) {
+        val requestId = routeRequestId
         val pts = ArrayList<LatLng>()
         val step = maxOf(1, r.pointCount / 200)
         var i = 0
@@ -1576,9 +3070,14 @@ class MainActivity : AppCompatActivity() {
         try {
             val b = LatLngBounds.Builder().includes(pts).build()
             following = false
-            map?.easeCamera(
-                CameraUpdateFactory.newLatLngBounds(b, dp(48f), dp(96f) + insetTop, dp(48f), dp(260f) + insetBottom), 900
-            )
+            prefs.edit().putBoolean("location_follow", false).apply()
+            findViewById<View>(R.id.root).post {
+                if (requestId != routeRequestId || navMode == NavMode.IDLE || isFinishing || isDestroyed) return@post
+                try {
+                    val p = mapViewportPadding()
+                    map?.easeCamera(CameraUpdateFactory.newLatLngBounds(b, p[0], p[1], p[2], p[3]), 900)
+                } catch (_: Exception) { }
+            }
         } catch (e: Exception) { /* degenerate route: keep the camera */ }
     }
 
@@ -1599,27 +3098,64 @@ class MainActivity : AppCompatActivity() {
 
     private fun startNav() {
         if (session == null) return
+        if (!hasLocationPermission()) {
+            withLocationPermission { startNav() }
+            return
+        }
+        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
+        val finePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarsePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasUsableProvider = (finePermission && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) ||
+            ((finePermission || coarsePermission) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
+        if (!hasUsableProvider) {
+            MaterialAlertDialogBuilder(this)
+                .setMessage("Для навигации включите геолокацию телефона.")
+                .setPositiveButton("Настройки") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
+                .setNegativeButton("Отмена", null).show()
+            return
+        }
         navMode = NavMode.ACTIVE
+        lastNavFixAt = System.currentTimeMillis()
+        navGpsLost = false
+        startNavWatchdog()
+        refreshLocationButton()
         offCount = 0
         announced.clear()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (prefs.getBoolean("nav_voice", true)) initTts()
         following = true
-        withLocationPermission { startLocation(false) }
+        prefs.edit().putBoolean("location_follow", true).apply()
+        startLocation(false)
         updateNavUi()
         session?.let { s ->
-            val st = s.route.steps.getOrNull(1) ?: s.route.steps.first()
-            findViewById<TextView>(R.id.navArrow).text = Maneuver.arrow(st.kind)
-            findViewById<TextView>(R.id.navDist).text = fmtStepDist(s.route.steps.first().distToNextM)
-            findViewById<TextView>(R.id.navText).text = s.route.steps.first().text
+            val first = s.route.steps.firstOrNull()
+            findViewById<TextView>(R.id.navArrow).text = Maneuver.arrow(first?.kind ?: Maneuver.DEPART)
+            findViewById<TextView>(R.id.navDist).text = fmtStepDist(first?.distToNextM ?: 0.0)
+            findViewById<TextView>(R.id.navText).text = first?.text ?: "Начните движение"
             setSummary(s.totalM, s.route.timeS)
         }
         val l = myLoc
-        if (l != null) onNavLocation(l) else toast("Ждём сигнал GPS…")
+        if (l != null && LocationQuality.isUsableForNavigation(l.time, l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY, System.currentTimeMillis(), navProfile)) {
+            lastNavFixAt = System.currentTimeMillis()
+            onNavLocation(l)
+        } else toast("Ждём точный сигнал GPS…")
     }
 
     private fun stopNav() {
+        stopNavWatchdog()
+        lastNavFixAt = 0L
+        navGpsLost = false
+        routeRequestId++ // invalidate any route calculation still running in the background
+        if (!locationRequestedByUser) {
+            locActive = false
+            following = false
+            prefs.edit().putBoolean("location_follow", false).apply()
+            stopLocationUpdates()
+            myLoc = null
+            refreshMe()
+        }
         navMode = NavMode.IDLE
+        refreshLocationButton()
         session = null
         navDest = null
         routeFrom = null
@@ -1637,7 +3173,16 @@ class MainActivity : AppCompatActivity() {
         updateNavUi()
     }
 
+    private fun startNavWatchdog() {
+        ui.removeCallbacks(navWatchdog)
+        if (navMode == NavMode.ACTIVE) ui.postDelayed(navWatchdog, 2_000L)
+    }
+
+    private fun stopNavWatchdog() { ui.removeCallbacks(navWatchdog) }
+
     private fun onNavLocation(l: Location) {
+        val accuracy = l.accuracy.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY
+        if (!LocationQuality.isUsableForNavigation(l.time, accuracy, System.currentTimeMillis(), navProfile)) return
         val s = session ?: return
         val prog = s.update(l.latitude, l.longitude)
         val m = map
@@ -1691,8 +3236,6 @@ class MainActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private val DATA_FILES = listOf("georgia.mbtiles", "relief.mbtiles", "contours.mbtiles", "places.db", "routing.bin")
-        private val GEORGIA = LatLngBounds.from(43.65, 46.8, 41.0, 40.0)
 
         private val KIND_RU: Map<String, String> = mapOf(
             "city" to "город", "town" to "город/посёлок", "village" to "село", "hamlet" to "хутор",

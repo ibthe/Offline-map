@@ -65,10 +65,15 @@ object MenuUi {
         val tileGrid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         tiles.chunked(3).forEachIndexed { rowIdx, chunk ->
             val tileRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            for (i in 0 until 3) {
-                val t = chunk.getOrNull(i)
-                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) }
-                if (t == null) { tileRow.addView(View(ctx), lp); continue }
+            val centeredPair = chunk.size == 2
+            val rowItems: List<MenuTile?> = if (centeredPair) listOf(null, chunk[0], chunk[1], null)
+                else listOf(chunk.getOrNull(0), chunk.getOrNull(1), chunk.getOrNull(2))
+            rowItems.forEachIndexed { i, t ->
+                val weight = if (centeredPair && (i == 0 || i == 3)) 0.5f else 1f
+                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight).apply {
+                    if (i > 0 && !(centeredPair && i == 3)) marginStart = dp(8)
+                }
+                if (t == null) { tileRow.addView(View(ctx), lp); return@forEachIndexed }
                 val tile = LinearLayout(ctx).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
