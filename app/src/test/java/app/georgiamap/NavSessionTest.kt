@@ -72,4 +72,35 @@ class NavSessionTest {
         assertFalse(besideDestination.arrived)
         assertTrue(besideDestination.remainingM > 100.0)
     }
+
+    @Test
+    fun progressDoesNotRewindWhenGpsSnapsToAnEarlierRouteSegment() {
+        val route = RouteResult(
+            doubleArrayOf(
+                0.0, 0.0,
+                0.0, 0.001,
+                0.001, 0.001,
+                0.001, 0.002,
+                0.0, 0.002
+            ),
+            445.0,
+            600.0,
+            listOf(
+                RouteStep(Maneuver.DEPART, "Старт", "", 0.0, 0.0, 0, 0.0),
+                RouteStep(Maneuver.ARRIVE, "Финиш", "", 0.0, 0.002, 4, 0.0)
+            )
+        )
+        val session = NavSession(route, Profile.FOOT)
+
+        val advanced = session.update(0.001, 0.002)
+        assertTrue(advanced.alongM > 300.0)
+
+        // The user has moved back near the start. Keep the last confirmed progress
+        // and flag the reverse movement so the activity can request a new route.
+        val backtracking = session.update(0.0, 0.0001)
+        assertTrue(backtracking.alongM >= advanced.alongM)
+        assertTrue(backtracking.remainingM <= advanced.remainingM)
+        assertTrue(backtracking.offRouteM > session.offRouteLimitM)
+    }
+
 }
